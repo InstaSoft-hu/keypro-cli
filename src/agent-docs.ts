@@ -7,7 +7,7 @@
 export const AGENT_DOCS = `# KeyPro CLI - AI agent guide
 
 Magyar: ez a KeyPro.hu B2B licencshop parancssori eszkoze; az alabbi angol
-utmutato AI-agenteknek (Claude Code, Codex) szol.
+utmutato AI-agenteknek (ChatGPT, Claude, Gemini, Codex, OpenCode) szol.
 
 ## Setup
 
@@ -82,7 +82,7 @@ for gls_parcelshop also \`--parcelshop <ID>\`
 
 ## MCP server mode
 
-Register the CLI as a native MCP toolset (recommended for Claude Code):
+Register the CLI as a native MCP server for any MCP client (Claude, ChatGPT, Codex, Gemini, OpenCode, Antigravity):
 
     claude mcp add keypro -- npx -y @keypro/cli mcp
 

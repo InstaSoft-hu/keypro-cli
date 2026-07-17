@@ -6,8 +6,9 @@ módosítása, rendelések / számlák / termékkulcsok lekérdezése, KEP-egyen
 profil kezelése. Regisztrált (jóváhagyott) viszonteladó fiók szükséges.
 
 AI-ügynök barát: minden parancs támogatja a `--json` kimenetet, és a
-`keypro mcp` beépített MCP stdio szerverként natív tool-okat ad a Claude Code /
-Claude Desktop / Codex típusú ügynököknek.
+`keypro mcp` beépített MCP stdio szerverként natív tool-okat ad a ChatGPT,
+Claude, Gemini, Codex, OpenCode, Antigravity és más MCP-kompatibilis
+ügynököknek.
 
 ## Biztonság és átláthatóság
 
@@ -108,7 +109,24 @@ keypro --json whoami
 
 ## MCP (AI ügynök) bekötés
 
-**Claude Desktop** — Settings → Developer → Edit Config:
+Bármely MCP-kompatibilis ügynök (Claude, ChatGPT, Codex, Gemini CLI, OpenCode,
+Antigravity ...) natív tool-ként éri el a KeyPro-t a helyi (stdio) MCP
+szerveren keresztül:
+
+```bash
+npx -y @keypro/cli mcp
+```
+
+Példák a regisztrációra:
+
+**Claude Code:**
+
+```bash
+claude mcp add keypro -- npx -y @keypro/cli mcp
+```
+
+**Claude Desktop** (Settings → Developer → Edit Config) — a legtöbb kliens
+hasonló `mcpServers` configot használ:
 
 ```json
 {
@@ -118,15 +136,9 @@ keypro --json whoami
 }
 ```
 
-**Claude Code:**
-
-```bash
-claude mcp add keypro -- npx -y @keypro/cli mcp
-```
-
 Az MCP a beállított kulcsot (`keypro setup` / config / `KEYPRO_API_KEY`)
-használja. A webes claude.ai számára a shop külön **távoli MCP connectort** ad
-(OAuth-tal); azt a fiókod `/mcp-cli` oldala írja le.
+használja. Webes ügynököknek (ChatGPT, claude.ai) a shop külön **távoli MCP
+connectort** ad (OAuth-tal); azt a fiókod `/mcp-cli` oldala írja le.
 
 ## Fejlesztés
 
