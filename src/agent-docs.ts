@@ -15,7 +15,7 @@ utmutato AI-agenteknek (Claude Code, Codex) szol.
    \`keypro setup\` - interactive wizard (asks the server, then API key [default]
    or email+password). Alternatives:
    - \`keypro login\` (email + password, mints + stores a fresh key)
-   - a key made on the website under "API kulcsok", stored via
+   - a key made on the website under "MCP és CLI", stored via
      \`keypro config set api-key kp_live_...\`, the KEYPRO_API_KEY env var
      (recommended for agents), or ~/.config/keypro/config.json
 2. API base URL: production is the default. For the dev site use \`keypro setup\`,

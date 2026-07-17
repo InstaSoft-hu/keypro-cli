@@ -7,7 +7,7 @@ utmutato AI-agenteknek (Claude Code, Codex) szol.
 
 1. The user needs a KeyPro account (approved reseller) and an API key.
    Either run `keypro login` (interactive email + password, stores a fresh
-   key) or create a key on the website under "API kulcsok" and store it:
+   key) or create a key on the website under "MCP és CLI" and store it:
    - env var: KEYPRO_API_KEY=kp_live_... (recommended for agents)
    - or config file: ~/.config/keypro/config.json
 2. API base URL: production is the default. For the dev site use

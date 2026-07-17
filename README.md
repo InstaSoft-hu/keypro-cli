@@ -17,7 +17,7 @@ Claude Desktop / Codex típusú ügynököknek.
   telemetria, nem gyűjt és nem küld semmit rajtad kívül máshova.
 - **Csak az általad megadott szerverhez beszél** (alap: `https://keypro.hu`).
 - **A kulcs a tiéd.** `Authorization: Bearer` fejlécben megy, te hozod létre és
-  bármikor visszavonhatod a fiókod `/api-keys` oldalán.
+  bármikor visszavonhatod a fiókod `/mcp-cli` oldalán.
 - **Provenance.** Az npm csomag GitHub Actions-ből, `--provenance` jelöléssel
   publikálódik, így kriptográfiailag igazolható, hogy a közzétett csomag ebből a
   forrásból, ebből a commitból épült.
@@ -55,7 +55,7 @@ keypro config set api-key kp_live_...        # elmenti a configba
 keypro login                                 # email + jelszó -> új kulcsot ment
 ```
 
-- Kulcsot a weben a fiók **API kulcsok** (`/api-keys`) oldalán készíthetsz,
+- Kulcsot a weben a fiók **MCP és CLI** (`/mcp-cli`) oldalán készíthetsz,
   scope-okkal (olvasás / rendelés / profil) és lejárattal.
 - A config a `~/.config/keypro/config.json` fájlban van (0600 jog).
 
@@ -126,7 +126,7 @@ claude mcp add keypro -- npx -y @keypro/cli mcp
 
 Az MCP a beállított kulcsot (`keypro setup` / config / `KEYPRO_API_KEY`)
 használja. A webes claude.ai számára a shop külön **távoli MCP connectort** ad
-(OAuth-tal); azt a fiókod `/api-keys` oldala írja le.
+(OAuth-tal); azt a fiókod `/mcp-cli` oldala írja le.
 
 ## Fejlesztés
 
