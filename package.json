@@ -1,0 +1,62 @@
+{
+  "name": "@keypro/cli",
+  "version": "0.1.5",
+  "description": "KeyPro.hu B2B szoftverlicenc webshop CLI: rendeles leadas, rendelesek/szamlak/termekkulcsok lekerdezese, profil kezeles. AI-ugynok (Claude Code, Codex) barat: --json kimenet es beepitett MCP szerver (keypro mcp).",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "keypro": "dist/index.js"
+  },
+  "exports": {
+    "./mcp-tools": {
+      "types": "./dist/mcp-tools.d.ts",
+      "import": "./dist/mcp-tools.js"
+    }
+  },
+  "files": [
+    "dist",
+    "AGENTS.md",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "dev": "tsx src/index.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/InstaSoft-hu/keypro-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/InstaSoft-hu/keypro-cli/issues"
+  },
+  "keywords": [
+    "keypro",
+    "cli",
+    "mcp",
+    "b2b",
+    "license"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.13.0",
+    "commander": "^14.0.0",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "tsup": "^8.5.0",
+    "tsx": "^4.23.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  },
+  "author": "InstaSoft Informatikai Zrt. (https://keypro.hu)",
+  "homepage": "https://github.com/InstaSoft-hu/keypro-cli#readme"
+}
