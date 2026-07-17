@@ -1,16 +1,8 @@
-# Publikalas az npm-re GitHub Release-re, provenance-szel.
-#
-# A provenance kriptografiailag osszekoti a kozzetett csomagot ezzel a repoval
-# es a build-workflow-val (npm "verified" jelveny). Feltetelek: a package.json
-# `repository` mezoje erre a repora mutat, `id-token: write` jog, publikus repo.
-#
-# Hitelesites - ket lehetoseg:
-#  1) Token: allits be egy NPM_TOKEN secretet (granular access token, ami
-#     publikalhat a @keypro scope-ra 2FA-prompt nelkul). Ezt hasznalja alabb.
-#  2) Trusted publishing (OIDC, token nelkul, ajanlott): npmjs.com-on a csomag
-#     beallitasainal add hozza megbizhato kiadokent ezt a repot + workflow-t,
-#     tavolitsd el a NODE_AUTH_TOKEN sort, es tedd be a `npm install -g npm@latest`
-#     lepest (a trusted publishing ujabb npm-et igenyel).
+# Publikalas az npm-re GitHub Release-re (es kezi inditasra), OIDC Trusted
+# Publishing-gel: nincs token, az npm a GitHub OIDC-jevel hitelesit, es a
+# provenance (verified source->package linkage) automatikus. Feltetelek:
+# npmjs.com-on a @keypro/cli csomaghoz Trusted Publisher = ez a repo +
+# publish.yml, `id-token: write` jog, es npm >= 11.5.1 (lentebb frissitjuk).
 name: Publish
 
 on:
@@ -29,12 +21,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           registry-url: https://registry.npmjs.org
+      - run: npm install -g npm@latest
       - run: npm install
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
       - run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
