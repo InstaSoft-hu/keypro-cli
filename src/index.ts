@@ -27,6 +27,7 @@ import {
   setJsonMode,
   usageError,
 } from "./output.js";
+import { KEYPRO_MCP_VERSION } from "./mcp-tools.js";
 import { runMcpServer } from "./mcp.js";
 import { promptHidden } from "./prompt.js";
 
@@ -37,7 +38,7 @@ program
   .description(
     "KeyPro.hu B2B licencshop CLI - rendeles, szamlak, termékkulcsok, profil. AI-agent utmutato: keypro agent-docs",
   )
-  .version("0.1.5")
+  .version(KEYPRO_MCP_VERSION)
   .option("--json", "gepi (JSON) kimenet a stdout-ra", false)
   .option("--api-key <kulcs>", "API kulcs (felulirja az env/config erteket)")
   .option("--api-base <url>", "API kiszolgalo cime (alap: eles bolt)")
@@ -190,7 +191,7 @@ program
         const key = (await promptHidden("API kulcs (kp_live_...): ")).trim();
         if (!key.startsWith("kp_live_")) {
           usageError(
-            "Érvénytelen kulcs formátum (kp_live_...). Kulcsot a weben az /api-keys oldalon készíthetsz.",
+            "Érvénytelen kulcs formátum (kp_live_...). Kulcsot a weben az /mcp-cli oldalon készíthetsz.",
           );
         }
         apiKey = key;

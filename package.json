@@ -1,6 +1,6 @@
 {
   "name": "@keypro/cli",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "KeyPro.hu B2B szoftverlicenc webshop CLI: rendeles leadas, rendelesek/szamlak/termekkulcsok lekerdezese, profil kezeles. AI-ugynok (ChatGPT, Claude, Gemini, Codex, OpenCode) barat: --json kimenet es beepitett MCP szerver (keypro mcp).",
   "license": "MIT",
   "type": "module",

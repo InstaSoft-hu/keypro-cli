@@ -16,6 +16,14 @@ import { KeyproApiError, type KeyproClient } from "./client.js";
 export { createClient, KeyproApiError } from "./client.js";
 export type { KeyproClient, KeyproClientOptions } from "./client.js";
 
+/**
+ * A kiszolgalt MCP szerver verzioja - EGY helyen. A CLI stdio szerver, a webes
+ * /mcp route es a `keypro --version` mind ezt hasznalja, igy nem csuszhat szet
+ * (korabban a web 0.1.4-en ragadt). Kiadaskor a package.json-nal egyutt ez az
+ * egy konstans valtozik.
+ */
+export const KEYPRO_MCP_VERSION = "0.1.6";
+
 const addressShape = z
   .object({
     firstName: z.string().optional(),
