@@ -149,6 +149,13 @@ pnpm typecheck
 pnpm test         # vitest
 ```
 
+> **Ez a repó generált másolat.** A forrás a KeyPro webshop privát
+> monorepójában él (`cli/`), és onnan írja felül a kiadási szkript
+> (`pnpm cli:release`), hogy a webshop beépített MCP-végpontja és az npm-re
+> kiadott csomag garantáltan ugyanazt a kódot futtassa. Kézzel itt ne
+> szerkessz: a következő kiadás felülírja. Hibajelentést és javaslatot
+> issue-ban várunk.
+
 ## Licenc
 
 MIT — lásd [LICENSE](./LICENSE).
