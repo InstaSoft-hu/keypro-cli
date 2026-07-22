@@ -156,7 +156,7 @@ program
 program
   .command("setup")
   .description("interaktiv beallitas: szerver + hitelesites (API kulcs vagy jelszo)")
-  .action(async (_opts: unknown, cmd: Command) => {
+  .action(async (_opts: unknown, _cmd: Command) => {
     try {
       const current = resolveConfig({});
 

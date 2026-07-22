@@ -10,10 +10,17 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { type KeyproClient } from "./client.js";
-import { KEYPRO_MCP_VERSION, registerKeyproTools } from "./mcp-tools.js";
+import {
+  KEYPRO_MCP_INSTRUCTIONS,
+  KEYPRO_MCP_VERSION,
+  registerKeyproTools,
+} from "./mcp-tools.js";
 
 export async function runMcpServer(client: KeyproClient): Promise<void> {
-  const server = new McpServer({ name: "keypro", version: KEYPRO_MCP_VERSION });
+  const server = new McpServer(
+    { name: "keypro", version: KEYPRO_MCP_VERSION },
+    { instructions: KEYPRO_MCP_INSTRUCTIONS },
+  );
   registerKeyproTools(server, client);
   const transport = new StdioServerTransport();
   await server.connect(transport);
