@@ -18,7 +18,7 @@ Claude, Gemini, Codex, OpenCode, Antigravity és más MCP-kompatibilis
   telemetria, nem gyűjt és nem küld semmit rajtad kívül máshova.
 - **Csak az általad megadott szerverhez beszél** (alap: `https://keypro.hu`).
 - **A kulcs a tiéd.** `Authorization: Bearer` fejlécben megy, te hozod létre és
-  bármikor visszavonhatod a fiókod `/mcp-cli` oldalán.
+  bármikor visszavonhatod a fiókod `/api` oldalán.
 - **Provenance.** Az npm csomag GitHub Actions-ből, `--provenance` jelöléssel
   publikálódik, így kriptográfiailag igazolható, hogy a közzétett csomag ebből a
   forrásból, ebből a commitból épült.
@@ -56,7 +56,7 @@ keypro config set api-key kp_live_...        # elmenti a configba
 keypro login                                 # email + jelszó -> új kulcsot ment
 ```
 
-- Kulcsot a weben a fiók **MCP és CLI** (`/mcp-cli`) oldalán készíthetsz,
+- Kulcsot a weben a fiók **API, MCP és CLI** (`/api`) oldalán készíthetsz,
   scope-okkal (olvasás / rendelés / profil) és lejárattal.
 - A config a `~/.config/keypro/config.json` fájlban van (0600 jog).
 
@@ -77,6 +77,7 @@ keypro config set api-base https://dev.keypro.hu
 | `keypro whoami` | a bejelentkezett fiók adatai |
 | `keypro rate` | aktuális EUR/HUF árfolyam (amit a shop használ) |
 | `keypro products search <szó>` / `products get <sku\|id>` | termékkeresés / részletek |
+| `keypro products images <sku\|id>` | a termék képeinek URL-je, soronként egy |
 | `keypro order preview --item <sku>=<db> --payment <mód>` | rendelés előnézete (összegek + confirmToken) |
 | `keypro order create --item ... --payment ... --yes` | rendelés leadása |
 | `keypro order list [--status ...]` / `order get <id>` | rendelések |
@@ -98,6 +99,47 @@ Rendelés-biztonság: a `create` és a `change-payment` mindig előnézetet kér
 (összegekkel) és csak a preview-ból származó `confirmToken`-nel hajtódik végre,
 így véletlen rendelés nem történhet.
 
+## Változatos termékek (csomagméretek, kiadások)
+
+Egyes termékek **csoportok** (`type: "variable"`): egy termékcsalád több
+változattal (pl. eszközszám, csomagméret). A csoport **nem rendelhető**, a nála
+látszó ár csak a változatok árának minimuma.
+
+- A `keypro products get <csoport>` válaszában `notPurchasable: true` és egy
+  `variants` tömb van; minden elemnek saját `productId`, `sku`, `attributes` és
+  `yourUnitNetEur` mezője van. A `keypro products search` ugyanezt a `variants`
+  tömböt adja a csoport-sorokon.
+- Mindig változatot rendelj: `--item <valtozat-sku>=<db>` vagy
+  `--item id:<valtozat-productId>=<db>`.
+- Ha mégis csoport kerül a rendelésbe, a szerver `variant_required` hibát ad, és
+  az `error.details.variants` felsorolja a választható változatokat.
+- Ha egy cikkszám több termékre illeszkedik, a szerver nem tippel, hanem
+  `ambiguous_sku` hibát ad (`error.details.ambiguousSkus`); ilyenkor add meg a
+  `productId`-t.
+
+## Termékképek
+
+Minden termék és minden változat kap egy `images` tömböt: rendezett, mindig ott
+van (kép nélküli terméknél üres, sosem `null`). Egy elem `{ url, alt, position }`,
+az URL **abszolút** és közvetlenül letölthető, az **első elem a fő kép a
+kiszolgálható képek közül**: amit a bolt nem tud kiszolgálni, azt ki sem küldi (a
+szerver naplózza), tehát ilyen terméknél a következő kép lesz az első. Külön
+`image` mező nincs.
+
+```bash
+keypro products images 123                        # soronként egy abszolút URL
+keypro products images 123 | xargs -n1 curl -O    # tükrözés a saját boltba
+keypro --json products images 123                 # strukturált tömb
+```
+
+- Kép nélküli terméknél a parancs semmit nem ír ki, és **0 kilépési kóddal** áll
+  meg: a hiányzó kép nem hiba, így egy `set -e` melletti tükröző ciklust nem
+  szakít meg.
+- A `keypro products get` a képek darabszámát és a fő kép URL-jét mutatja; a
+  `--json` (és a `products search --json`) a teljes tömböt adja.
+- Régebbi bolt-telepítésnél, ahol a mező még nincs a válaszban, a CLI "nincs
+  kép"-ként viselkedik, nem hibázik.
+
 ## Gépi (JSON) kimenet
 
 Minden parancs támogatja a `--json`-t: a stdout-ra gépi adat, a hibák a
@@ -106,6 +148,16 @@ stderr-re mennek stabil `error.code`-dal (snake_case, angol). Példa:
 ```bash
 keypro --json whoami
 ```
+
+## REST API (CLI nélkül)
+
+A CLI és az MCP szerver ugyanannak a nyilvános REST API-nak a burkolója. Ha
+saját szkriptből vagy más nyelvből hívnád közvetlenül, a teljes mezőszintű
+hivatkozás a csomagban szállított **[API.md](./API.md)**: alap-URL,
+hitelesítés és scope-ok, a stabil `error.code` értékek, lapozás, és
+végpontonként a válasz mezői.
+
+Webes változata: <https://keypro.hu/api>
 
 ## MCP (AI ügynök) bekötés
 
@@ -138,7 +190,7 @@ hasonló `mcpServers` configot használ:
 
 Az MCP a beállított kulcsot (`keypro setup` / config / `KEYPRO_API_KEY`)
 használja. Webes ügynököknek (ChatGPT, claude.ai) a shop külön **távoli MCP
-connectort** ad (OAuth-tal); azt a fiókod `/mcp-cli` oldala írja le.
+connectort** ad (OAuth-tal); azt a fiókod `/api` oldala írja le.
 
 ## Fejlesztés
 

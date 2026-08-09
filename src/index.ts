@@ -17,6 +17,7 @@ import {
 } from "./client.js";
 import { configPath, readConfig, resolveConfig, writeConfig } from "./config.js";
 import { AGENT_DOCS } from "./agent-docs.js";
+import { featuredImage, imageUrlLines, parseProductImages } from "./images.js";
 import { parseItemSpec } from "./items.js";
 import {
   eurFmt,
@@ -191,7 +192,7 @@ program
         const key = (await promptHidden("API kulcs (kp_live_...): ")).trim();
         if (!key.startsWith("kp_live_")) {
           usageError(
-            "Érvénytelen kulcs formátum (kp_live_...). Kulcsot a weben az /mcp-cli oldalon készíthetsz.",
+            "Érvénytelen kulcs formátum (kp_live_...). Kulcsot a weben az /api oldalon készíthetsz.",
           );
         }
         apiKey = key;
@@ -328,9 +329,9 @@ const products = program.command("products").description("termek-katalogus");
 products
   .command("search [query]")
   .description("termekkereses nev vagy cikkszam alapjan")
-  .option("--category <slug>", "kategoria-szures")
+  .option("--category <slug>", "kategoria-szures (alkategoriakkal egyutt)")
   .option("--on-sale", "csak akcios termekek", false)
-  .option("--sort <mod>", "rendezes: name|price_asc|price_desc|newest")
+  .option("--sort <mod>", "rendezes: popularity|name|price_asc|price_desc|newest")
   .option("--limit <n>", "talalatok szama (max 100)", "25")
   .action(
     async (
@@ -348,7 +349,7 @@ products
         });
         output(result, () => {
           printTable(
-            ["ID", "SKU", "Név", "Nettó EUR", "Akciós"],
+            ["ID", "SKU", "Név", "Katalógus nettó EUR", "Akciós"],
             result.products.map((p) => [
               String(p.id),
               p.sku ? String(p.sku) : "-",
@@ -372,6 +373,11 @@ products
     try {
       const p = await clientFor(cmd).productGet(keyArg);
       output(p, () => {
+        // A kepekbol csak a DARABSZAM es a FO KEP kerul ide: egy URL-lista a
+        // kulcs-ertek blokkban olvashatatlan, es gepi feldolgozasra ugyis a
+        // `keypro products images` (soronkent egy URL) vagy a --json valo.
+        const images = parseProductImages(p);
+        const featured = featuredImage(images);
         printKV([
           ["Termék", `${p.name} (#${p.id})`],
           ["SKU", p.sku as string | null],
@@ -385,7 +391,34 @@ products
               : null,
           ],
           ["Szállítást igényel", p.isVirtual ? "nem (digitális)" : "igen (fizikai)"],
+          ["Képek", images.length > 0 ? `${images.length} db` : "nincs"],
+          ["Fő kép", featured ? featured.url : null],
         ]);
+        if (images.length > 1) {
+          process.stdout.write(
+            `\nAz összes kép URL-je: keypro products images ${p.id}\n`,
+          );
+        }
+      });
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+products
+  .command("images <skuVagyId>")
+  .description("a termek kepeinek URL-je, soronkent egy (id, slug vagy cikkszam)")
+  .action(async (keyArg: string, _opts: unknown, cmd: Command) => {
+    try {
+      const p = await clientFor(cmd).productGet(keyArg);
+      // --json: a normalizalt tomb (regi kiszolgalonal is tomb, sosem null).
+      // Ember-olvashato mod: CSAK az URL-ek, soronkent egy, hogy a
+      // `keypro products images 123 | xargs -n1 curl -O` mukodjon. Kep nelkuli
+      // termek ures kimenet + 0 kilepesi kod: a hianyzo kep nem hiba, es egy
+      // `set -e` alatt futo tukrozo ciklust nem szabad megallitania.
+      const images = parseProductImages(p);
+      output(images, () => {
+        process.stdout.write(imageUrlLines(images));
       });
     } catch (err) {
       fail(err);
@@ -431,6 +464,10 @@ function addOrderOptions(cmd: Command): Command {
     .option("--coupon <kod>", "kuponkod")
     .option("--currency <penznem>", "EUR vagy HUF", "EUR")
     .option("--tax-number <adoszam>", "adoszam (ceges szamlahoz)")
+    .option(
+      "--internal-reference <azonosito>",
+      "sajat belso azonosito (rakerul a bizonylatok megjegyzes rovatara)",
+    )
     .option("--card <pm_id>", "mentett kartya azonosito (card fizetesnel)");
   for (const [flag, ] of ADDRESS_FLAG_FIELDS) {
     cmd.option(`--billing-${flag} <ertek>`);
@@ -503,6 +540,7 @@ function buildOrderRequest(opts: Record<string, unknown>): OrderRequestInput {
     billing: address("billing"),
     shipping: address("shipping"),
     taxNumber: opts.taxNumber as string | undefined,
+    internalReference: opts.internalReference as string | undefined,
     cardId: opts.card as string | undefined,
   };
 }

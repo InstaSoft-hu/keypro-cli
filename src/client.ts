@@ -47,6 +47,8 @@ export interface OrderRequestInput {
   billing?: AddressInput;
   shipping?: AddressInput;
   taxNumber?: string;
+  /** Sajat belso azonosito; rakerul a bizonylatok megjegyzes rovatara. */
+  internalReference?: string;
   cardId?: string;
 }
 
@@ -159,6 +161,8 @@ export class KeyproClient {
     category?: string;
     onSale?: boolean;
     sort?: string;
+    /** A valtozat-sorok onallo talalatkent is jojjenek (`include_variants`). */
+    includeVariants?: boolean;
     limit?: number;
     offset?: number;
   }) {
@@ -167,6 +171,7 @@ export class KeyproClient {
     if (params.category) qs.set("category", params.category);
     if (params.onSale) qs.set("on_sale", "true");
     if (params.sort) qs.set("sort", params.sort);
+    if (params.includeVariants) qs.set("include_variants", "true");
     if (params.limit) qs.set("limit", String(params.limit));
     if (params.offset) qs.set("offset", String(params.offset));
     const suffix = qs.size > 0 ? `?${qs}` : "";

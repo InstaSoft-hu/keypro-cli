@@ -7,9 +7,9 @@ const shared: Options = {
   dts: false,
 };
 
-// Ket kulon build: a bin (index.js) shebanggel; a megosztott MCP registry
-// (mcp-tools.js, amit a webes route importal) shebang NELKUL, hogy a Next/
-// Turbopack build be tudja huzni.
+// Ket kulon build: a bin (index.js) shebanggel; a webes app altal importalt
+// modulok (mcp-tools.js az MCP registryhez, agent-docs.js az agens-utmutatohoz)
+// shebang NELKUL, hogy a Next/Turbopack build be tudja huzni oket.
 export default defineConfig([
   {
     ...shared,
@@ -19,9 +19,9 @@ export default defineConfig([
   },
   {
     ...shared,
-    entry: ["src/mcp-tools.ts"],
+    entry: ["src/mcp-tools.ts", "src/agent-docs.ts"],
     clean: false,
-    // A webes app (tsc) tipusai a mcp-tools.d.ts-bol jonnek.
+    // A webes app (tsc) tipusai a *.d.ts-ekbol jonnek.
     dts: true,
   },
 ]);

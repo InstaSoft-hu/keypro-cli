@@ -9,6 +9,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { KeyproApiError, type KeyproClient } from "./client.js";
+import { priceContract } from "./price-contract.js";
 
 // A webes tavoli MCP route (@keypro/cli/mcp-tools) innen kapja a klienst is,
 // hogy a registry es a kliens UGYANABBOL a bundle-bol jojjon (kozos
@@ -22,19 +23,28 @@ export type { KeyproClient, KeyproClientOptions } from "./client.js";
  * (korabban a web 0.1.4-en ragadt). Kiadaskor a package.json-nal egyutt ez az
  * egy konstans valtozik.
  */
-export const KEYPRO_MCP_VERSION = "0.1.7";
+export const KEYPRO_MCP_VERSION = "0.1.8";
 
 /**
  * A szerver `instructions` mezoje (MCP initialize). A kliens modellje ezt latja
  * a tool-lista mellett. Kell, mert kulonben a hivo modell azt hiszi, nincs
  * hozzaferese a fiokhoz, es a tool meghivasa helyett a weboldali bejelentkezest
  * ajanlja (a ChatGPT connector pontosan igy viselkedett).
+ *
+ * Az ar-bekezdes a KOZOS `priceContract(...)`-bol jon (`price-contract.ts`):
+ * itt allt 2026-08-09-ig a hamis "already include the caller's own contracted
+ * discounts" mondat, mikozben az `AGENT_DOCS` es az `API.md` mar az
+ * ellenkezojet mondta. Kezzel irt masodik peldany ide nem kerulhet.
  */
 export const KEYPRO_MCP_INSTRUCTIONS = `This server is already authenticated as ONE specific KeyPro.hu B2B customer account (OAuth or API key). Every tool acts on that account: there is no login step, no account or user id parameter, and no way to reach another account.
 
 Never tell the user to log in on the website, and never claim you cannot access their account or orders. Call the tool instead. If you are unsure who the caller is, call keypro_whoami first.
 
-Prices are net EUR and already include the caller's own contracted discounts; keypro_exchange_rate gives the HUF rate the shop displays.
+${priceContract({
+  catalog: "keypro_products_search",
+  ownPrice: "keypro_product_get",
+  preview: "keypro_order_preview",
+})} keypro_exchange_rate gives the HUF rate the shop displays.
 
 Ordering is preview-then-confirm: call keypro_order_preview (or keypro_order_change_payment_preview), show the returned totals to the user, get their approval, then call keypro_order_create (or keypro_order_change_payment) with the returned confirmToken.`;
 
@@ -104,6 +114,12 @@ const orderRequestShape = {
     "Separate shipping address (omit to ship to the billing address)",
   ),
   taxNumber: z.string().optional(),
+  internalReference: z
+    .string()
+    .optional()
+    .describe(
+      "Your own internal reference / PO number; printed verbatim in the comment field of every invoice of this order",
+    ),
   cardId: z
     .string()
     .optional()
@@ -164,11 +180,20 @@ export function registerKeyproTools(server: McpServer, client: KeyproClient): vo
     {
       title: "Search products",
       description:
-        "Search the KeyPro product catalog by name or SKU. Returns id, sku, name, net EUR price.",
+        "Search the catalog. Returns id, sku, name and the CATALOG net EUR price (netPriceEur, listNetPriceEur) - that price does NOT carry the caller's contracted discount, so never quote it as the caller's own price: use yourUnitNetEur from keypro_product_get, and the binding total from keypro_order_preview. A product with type='variable' is a GROUP that cannot be ordered directly - order one of the productIds listed in its `variants` array. Pass includeVariants=true to get variant rows in the flat list too. Every product and every variant entry also carries an `images` array of { url, alt, position }: ordered, always present (empty when the product has no picture, never null). The urls are ABSOLUTE and directly fetchable, so you can show or download them without building a link yourself. `images[0]` is the featured image AMONG THE SERVED ONES: a stored image the shop cannot serve is left out of the array (the server logs it), so on such a product the next image becomes `images[0]`.",
       inputSchema: {
         q: z.string().optional().describe("Search text (name or SKU)"),
-        category: z.string().optional().describe("Category slug filter"),
+        category: z
+          .string()
+          .optional()
+          .describe("Category slug filter (subcategories included)"),
         onSale: z.boolean().optional().describe("Only discounted products"),
+        includeVariants: z
+          .boolean()
+          .optional()
+          .describe(
+            "List variant rows as separate results too (default: only group rows, with their variants nested)",
+          ),
         limit: z.number().int().min(1).max(100).optional(),
       },
       annotations: READ_ONLY,
@@ -179,6 +204,7 @@ export function registerKeyproTools(server: McpServer, client: KeyproClient): vo
           q: args.q,
           category: args.category,
           onSale: args.onSale,
+          includeVariants: args.includeVariants,
           limit: args.limit,
         }),
       ),
@@ -189,7 +215,7 @@ export function registerKeyproTools(server: McpServer, client: KeyproClient): vo
     {
       title: "Product details",
       description:
-        "Product details by id, slug or SKU, including the caller's effective unit price with discounts.",
+        "Product details plus YOUR effective unit price. For a type='variable' group the response has notPurchasable=true and a `variants` array, each entry with its own productId, attributes and yourUnitNetEur - order one of those. The product and every variant entry carries an `images` array of { url, alt, position }: ordered, always present (empty when the product has no picture, never null). The urls are ABSOLUTE and directly fetchable, so you can show or download them without building a link yourself. `images[0]` is the featured image AMONG THE SERVED ONES: a stored image the shop cannot serve is left out of the array (the server logs it), so on such a product the next image becomes `images[0]`.",
       inputSchema: { key: z.string().describe("Product id, slug or SKU") },
       annotations: READ_ONLY,
     },
@@ -201,7 +227,7 @@ export function registerKeyproTools(server: McpServer, client: KeyproClient): vo
     {
       title: "Preview an order",
       description:
-        "Preview an order WITHOUT placing it: priced lines, fees, shipping, totals, and a confirmToken (valid 15 minutes). ALWAYS show the returned totals to the user and get their approval before calling keypro_order_create.",
+        "Preview an order WITHOUT placing it: priced lines, fees, shipping, totals, and a confirmToken (valid 15 minutes). ALWAYS show the returned totals to the user and get their approval before calling keypro_order_create. The `stock` block says what ships immediately and what has to be procured first (`backordered > 0`): the order is never blocked for stock, but tell the user before placing it.",
       inputSchema: orderRequestShape,
       annotations: READ_ONLY,
     },
