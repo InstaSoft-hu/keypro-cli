@@ -889,13 +889,19 @@ keysCmd
         const result = await client.licenseKeys();
         output(result, () => {
           for (const group of result.products) {
-            process.stdout.write(`\n${group.productName}\n`);
+            process.stdout.write(
+              `\n${group.productName} - ${group.totalUnits} db, ebből ${group.allocatedUnits} továbbadva, ${group.remainingUnits} szabad\n`,
+            );
             printTable(
-              ["Kulcs", "Rendelés", "Kézbesítve"],
+              ["Kulcs", "Db", "Kiadva", "Szabad", "Rendelés", "Rendelés kelte"],
               group.keys.map((k) => [
-                String(k.keyValue),
+                // A `null` a szerviz kiesese: a darabszamok ettol meg allnak.
+                k.keyValue ? String(k.keyValue) : "(a kulcs most nem olvasható)",
+                String(k.quantity),
+                String(k.allocated),
+                String(k.remaining),
                 k.orderNumber ? `#${k.orderNumber}` : "-",
-                k.deliveredAt ? String(k.deliveredAt).slice(0, 10) : "-",
+                k.orderCreatedAt ? String(k.orderCreatedAt).slice(0, 10) : "-",
               ]),
             );
           }
@@ -908,6 +914,136 @@ keysCmd
       fail(err);
     }
   });
+
+// ---------------------------------------------------------------------------
+// Licenc-atruhazasi dokumentumok (viszontelado -> vegfelhasznalo)
+// ---------------------------------------------------------------------------
+
+const licdocCmd = program
+  .command("licdok")
+  .description("kiallitott licenc-atruhazasi dokumentumok");
+
+licdocCmd
+  .command("list")
+  .description("kiallitott dokumentumok listaja")
+  .option("--product <id>", "csak az adott termeket vivo dokumentumok")
+  .option("--order <id>", "csak az adott rendelesbol merito dokumentumok")
+  .option("--status <allapot>", "live | revoked | all", "live")
+  .option("--limit <n>", "darabszam", "25")
+  .option("--offset <n>", "eltolas", "0")
+  .action(
+    async (
+      opts: {
+        product?: string;
+        order?: string;
+        status: string;
+        limit: string;
+        offset: string;
+      },
+      cmd: Command,
+    ) => {
+      if (!["live", "revoked", "all"].includes(opts.status)) {
+        usageError("A --status erteke live, revoked vagy all lehet.");
+      }
+      try {
+        const result = await clientFor(cmd).licenseDocumentsList({
+          productId: opts.product ? Number(opts.product) : undefined,
+          orderId: opts.order ? Number(opts.order) : undefined,
+          status: opts.status as "live" | "revoked" | "all",
+          limit: Number(opts.limit),
+          offset: Number(opts.offset),
+        });
+        output(result, () => {
+          printTable(
+            ["ID", "Szám", "Végfelhasználó", "Db", "Állapot", "Kiállítva"],
+            result.documents.map((doc) => [
+              String(doc.id),
+              String(doc.documentNumber),
+              String(doc.customerName),
+              String(doc.totalQty),
+              doc.revokedAt ? "visszavont" : "élő",
+              String(doc.createdAt).slice(0, 10),
+            ]),
+          );
+          if (result.documents.length === 0) {
+            process.stdout.write("Nincs ilyen kiállított dokumentum.\n");
+          } else {
+            // A lista SZANDEKOSAN nem viszi a kulcsokat (meret), ezert a
+            // kovetkezo lepest ki is mondjuk.
+            process.stdout.write(
+              `\nÖsszesen ${result.total} db. A termékkulcsokhoz: keypro licdok get <id>\n`,
+            );
+          }
+        });
+      } catch (err) {
+        fail(err);
+      }
+    },
+  );
+
+licdocCmd
+  .command("get <id>")
+  .description("egy dokumentum teljes pillanatkepe (termékkulcsokkal)")
+  .action(async (id: string, _opts: unknown, cmd: Command) => {
+    try {
+      const { document } = await clientFor(cmd).licenseDocumentGet(Number(id));
+      output({ document }, () => {
+        const customer = document.customer as Record<string, string | null>;
+        printKV([
+          ["Dokumentum", String(document.documentNumber)],
+          ["Állapot", document.revokedAt ? "visszavont" : "élő"],
+          ["Kiállítva", String(document.createdAt).slice(0, 10)],
+          ["Visszavonva", document.revokedAt ? String(document.revokedAt).slice(0, 10) : null],
+          ["Végfelhasználó", customer.name],
+          ["Adószám", customer.taxNumber],
+          ["Cím", [customer.postcode, customer.city, customer.addressLine].filter(Boolean).join(" ") || null],
+          ["Kapcsolat", customer.contact],
+        ]);
+        for (const item of document.items as Array<Record<string, unknown>>) {
+          process.stdout.write(`\n${String(item.productName)} - ${String(item.qty)} db\n`);
+          printTable(
+            ["Kulcs", "Db", "Rendelés"],
+            (item.keys as Array<Record<string, unknown>>).map((key) => [
+              String(key.keyValue),
+              String(key.qty),
+              key.orderNumber ? `#${key.orderNumber}` : "-",
+            ]),
+          );
+        }
+      });
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+licdocCmd
+  .command("pdf <id>")
+  .description("a dokumentum PDF-je fajlba (atruhazas | megsemmisites)")
+  .option("--kind <fajta>", "atruhazas vagy megsemmisites", "atruhazas")
+  .option("--out <fajl>", "cel fajlnev (alap: a szervertol kapott nev)")
+  .action(
+    async (id: string, opts: { kind: string; out?: string }, cmd: Command) => {
+      if (opts.kind !== "atruhazas" && opts.kind !== "megsemmisites") {
+        usageError("A --kind erteke atruhazas vagy megsemmisites lehet.");
+      }
+      try {
+        const { bytes, filename } = await clientFor(cmd).licenseDocumentPdf(
+          Number(id),
+          opts.kind,
+        );
+        // A `--out` a FELHASZNALO utvonala, azt nem korlatozzuk. A `filename`
+        // viszont a szervertol jon, es a `client.ts` mar tisztitva adja
+        // (`download-name.ts`): sosem hagyhatja el a munkakonyvtarat.
+        const target = opts.out ?? filename ?? `licenc-dokumentum-${id}.pdf`;
+        writeFileSync(target, bytes);
+        output({ savedTo: target, bytes: bytes.length }, () => {
+          process.stdout.write(`Mentve: ${target} (${bytes.length} bájt)\n`);
+        });
+      } catch (err) {
+        fail(err);
+      }
+    },
+  );
 
 // ---------------------------------------------------------------------------
 // Szamlak

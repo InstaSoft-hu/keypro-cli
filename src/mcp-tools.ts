@@ -23,7 +23,7 @@ export type { KeyproClient, KeyproClientOptions } from "./client.js";
  * (korabban a web 0.1.4-en ragadt). Kiadaskor a package.json-nal egyutt ez az
  * egy konstans valtozik.
  */
-export const KEYPRO_MCP_VERSION = "0.1.8";
+export const KEYPRO_MCP_VERSION = "0.1.9";
 
 /**
  * A szerver `instructions` mezoje (MCP initialize). A kliens modellje ezt latja
@@ -180,7 +180,7 @@ export function registerKeyproTools(server: McpServer, client: KeyproClient): vo
     {
       title: "Search products",
       description:
-        "Search the catalog. Returns id, sku, name and the CATALOG net EUR price (netPriceEur, listNetPriceEur) - that price does NOT carry the caller's contracted discount, so never quote it as the caller's own price: use yourUnitNetEur from keypro_product_get, and the binding total from keypro_order_preview. A product with type='variable' is a GROUP that cannot be ordered directly - order one of the productIds listed in its `variants` array. Pass includeVariants=true to get variant rows in the flat list too. Every product and every variant entry also carries an `images` array of { url, alt, position }: ordered, always present (empty when the product has no picture, never null). The urls are ABSOLUTE and directly fetchable, so you can show or download them without building a link yourself. `images[0]` is the featured image AMONG THE SERVED ONES: a stored image the shop cannot serve is left out of the array (the server logs it), so on such a product the next image becomes `images[0]`.",
+        "Search the catalog. Returns id, sku, name and the CATALOG net EUR price (netPriceEur, listNetPriceEur) - that price does NOT carry the caller's contracted discount, so never quote it as the caller's own price: use yourUnitNetEur from keypro_product_get, and the binding total from keypro_order_preview. A product with type='variable' is a GROUP that cannot be ordered directly - order one of the productIds listed in its `variants` array. Pass includeVariants=true to get variant rows in the flat list too. Every product and every variant entry also carries an `images` array of { url, alt, position }: ordered, always present (empty when the product has no picture, never null). The urls are ABSOLUTE and directly fetchable, so you can show or download them without building a link yourself. `images[0]` is the featured image AMONG THE SERVED ONES: a stored image the shop cannot serve is left out of the array (the server logs it), so on such a product the next image becomes `images[0]`. A VARIANT WITH NO OWN IMAGE INHERITS ITS GROUP'S: a variant that has at least one servable image of its own carries only that one, and a variant that has none is served the group's array unchanged (same filtering, same `images[0]` rule). Inheritance never runs the other way, so a picture on a variant may in fact depict the whole group - today the variants do not look different from each other.",
       inputSchema: {
         q: z.string().optional().describe("Search text (name or SKU)"),
         category: z
@@ -215,7 +215,7 @@ export function registerKeyproTools(server: McpServer, client: KeyproClient): vo
     {
       title: "Product details",
       description:
-        "Product details plus YOUR effective unit price. For a type='variable' group the response has notPurchasable=true and a `variants` array, each entry with its own productId, attributes and yourUnitNetEur - order one of those. The product and every variant entry carries an `images` array of { url, alt, position }: ordered, always present (empty when the product has no picture, never null). The urls are ABSOLUTE and directly fetchable, so you can show or download them without building a link yourself. `images[0]` is the featured image AMONG THE SERVED ONES: a stored image the shop cannot serve is left out of the array (the server logs it), so on such a product the next image becomes `images[0]`.",
+        "Product details plus YOUR effective unit price. For a type='variable' group the response has notPurchasable=true and a `variants` array, each entry with its own productId, attributes and yourUnitNetEur - order one of those. The product and every variant entry carries an `images` array of { url, alt, position }: ordered, always present (empty when the product has no picture, never null). The urls are ABSOLUTE and directly fetchable, so you can show or download them without building a link yourself. `images[0]` is the featured image AMONG THE SERVED ONES: a stored image the shop cannot serve is left out of the array (the server logs it), so on such a product the next image becomes `images[0]`. A VARIANT WITH NO OWN IMAGE INHERITS ITS GROUP'S: a variant that has at least one servable image of its own carries only that one, and a variant that has none is served the group's array unchanged (same filtering, same `images[0]` rule). Inheritance never runs the other way, so a picture on a variant may in fact depict the whole group - today the variants do not look different from each other.",
       inputSchema: { key: z.string().describe("Product id, slug or SKU") },
       annotations: READ_ONLY,
     },
@@ -354,11 +354,53 @@ export function registerKeyproTools(server: McpServer, client: KeyproClient): vo
     {
       title: "My license keys",
       description:
-        "All license keys delivered to the authenticated account, grouped by product.",
+        "All license keys delivered to the authenticated account, grouped by product, WITH the reseller allocation numbers. Per product: totalUnits / allocatedUnits / remainingUnits and orderCount; per key: keyId, keyValue, quantity (a volume/MAK key carries several activations), allocated (already handed on via an issued transfer document), remaining, orderId, orderNumber and orderCreatedAt. keyValue can be null when the licence service is momentarily unreachable - the counts are still correct, and a null is never a placeholder string. There is no deliveredAt: the source table has no date column at all, so orderCreatedAt (the source order's date) is what exists. COST: one call resolves every key of the account against the licence service one by one, so this tool has its own tighter rate limit (6 calls / minute per API key, HTTP 429 above it). The answer only changes when a key is delivered or a transfer document is issued - keep it instead of calling again in a loop.",
       inputSchema: {},
       annotations: READ_ONLY,
     },
     () => run(() => client.licenseKeys()),
+  );
+
+  server.registerTool(
+    "keypro_license_documents_list",
+    {
+      title: "My issued licence transfer documents",
+      description:
+        "List the licence transfer documents this reseller account has issued to its own end customers (newest first). SUMMARY rows only: id, documentNumber, orderId, status (live/revoked), customerName, totalQty, items (productId, productName, qty), createdAt, revokedAt. Product keys are deliberately NOT on the list - fetch one document with keypro_license_document_get to get them. Filter by productId, by orderId (the order may be the document's primary source or appear in a key allocation) and by status.",
+      inputSchema: {
+        productId: z.number().int().positive().optional(),
+        orderId: z.number().int().positive().optional(),
+        status: z
+          .enum(["live", "revoked", "all"])
+          .optional()
+          .describe("Default: live (revoked documents are hidden)"),
+        limit: z.number().int().min(1).max(100).optional(),
+        offset: z.number().int().min(0).optional(),
+      },
+      annotations: READ_ONLY,
+    },
+    (args) =>
+      run(() =>
+        client.licenseDocumentsList({
+          productId: args.productId,
+          orderId: args.orderId,
+          status: args.status,
+          limit: args.limit,
+          offset: args.offset,
+        }),
+      ),
+  );
+
+  server.registerTool(
+    "keypro_license_document_get",
+    {
+      title: "One issued licence transfer document",
+      description:
+        "The FULL snapshot of one issued licence transfer document: the end customer's data (name, tax number, address, contact) as recorded at issue time, and items[] with keys[] carrying the FULL, unmasked keyValue plus its orderId / orderNumber. The keys come from the stored snapshot, never re-resolved from the licence service, so they never move and never go null. The `pdf` field holds the two download URLs (transfer certificate, decommission statement); they need the same API key, they are not capability links. A document belonging to another account answers not_found, never 403.",
+      inputSchema: { documentId: z.number().int().positive() },
+      annotations: READ_ONLY,
+    },
+    (args) => run(() => client.licenseDocumentGet(args.documentId)),
   );
 
   server.registerTool(

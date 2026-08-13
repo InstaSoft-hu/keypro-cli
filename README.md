@@ -83,7 +83,10 @@ keypro config set api-base https://dev.keypro.hu
 | `keypro order list [--status ...]` / `order get <id>` | rendelések |
 | `keypro order cancel <id>` | fizetetlen rendelés visszamondása |
 | `keypro order change-payment <id> --payment <mód> [--yes]` | fizetési mód módosítása |
-| `keypro keys list [--order <id>]` | kézbesített termékkulcsok |
+| `keypro keys list [--order <id>]` | kézbesített termékkulcsok, a továbbadási számokkal |
+| `keypro licdok list [--product <id>] [--order <id>] [--status ...]` | kiállított licenc-átruházási dokumentumok (kulcsok nélkül) |
+| `keypro licdok get <id>` | egy dokumentum teljes pillanatképe, termékkulcsokkal |
+| `keypro licdok pdf <id> [--kind atruhazas\|megsemmisites] [--out fájl]` | a dokumentum PDF-je |
 | `keypro invoices list [--order <id>]` / `invoices get <id>` | számlák / díjbekérők (PDF link) |
 | `keypro wallet [transactions]` | KEP-egyenleg + tranzakciók |
 | `keypro profile get` / `profile set billing.city=... ` | profil |

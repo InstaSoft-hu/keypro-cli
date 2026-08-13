@@ -98,6 +98,13 @@ the FIRST element is the featured image AMONG THE SERVED ONES: a stored image
 the shop cannot serve is left out of the array (the server logs it), so on such
 a product the next image becomes the first. There is no separate \`image\` field.
 
+A VARIANT WITH NO OWN IMAGE INHERITS ITS GROUP'S. A variant that has at least
+one servable image of its own carries only that one; a variant that has none is
+served the group's array unchanged, after the same filtering. Inheritance never
+runs the other way (a group never takes a variant's picture), and a variant is
+recognisable by its \`groupProductId\`. So a picture on a variant may depict the
+group as a whole - today the variants of a family do not look different.
+
 - \`keypro products images <sku|id>\` prints ONE absolute URL per line and
   nothing else, so mirroring the pictures into your own webshop is one line:
   \`keypro products images 123 | xargs -n1 curl -O\`.
@@ -120,7 +127,14 @@ a product the next image becomes the first. There is no separate \`image\` field
   NOT 8-day cheque or already-paid orders)
 - \`keypro order change-payment <id> --payment <method> [--yes]\` - change an
   unpaid order's payment method (preview first; wallet/stripe move money)
-- \`keypro keys list [--order <id>]\` - delivered license keys
+- \`keypro keys list [--order <id>]\` - delivered license keys, with the
+  reseller allocation numbers (per key: quantity / already handed on / free)
+- \`keypro licdok list [--product <id>] [--order <id>] [--status live|revoked|all]\`
+  - licence transfer documents you issued to your own end customers (summary
+  rows, no product keys)
+- \`keypro licdok get <id>\` - one document in full: the end customer's data
+  and the FULL, unmasked product keys
+- \`keypro licdok pdf <id> [--kind atruhazas|megsemmisites] [--out file]\`
 - \`keypro invoices list [--order <id>]\` / \`keypro invoices get <id>\`
   (each invoice has a public \`downloadUrl\` PDF link)
 - \`keypro wallet\` / \`keypro wallet transactions\` - KEP balance + history
@@ -152,14 +166,26 @@ agent that cannot install npm packages can call it directly.
 - Scopes: \`read\`, \`orders:write\`, \`profile:write\`. No implicit widening -
   every endpoint demands exactly one. The \`admin\` scope is never issued as an
   API key and satisfies nothing under /api/v1.
-- Rate limit: 120 requests / minute per key (HTTP 429 + \`Retry-After\`).
-- Paging: ONLY four endpoints take \`limit\` (1-100) + \`offset\`:
-  \`GET /products\`, \`GET /orders\`, \`GET /invoices\`, \`GET /wallet\`. Only
-  \`GET /products\` returns a \`total\`; on the other three page until the array
-  is shorter than \`limit\`. Every OTHER list endpoint (\`GET /keys\`,
-  \`GET /cards\`, \`GET /license-keys\`, \`GET /shipping/parcelshops\`,
-  \`GET /orders/{id}/keys\`) IGNORES those parameters silently and returns the
-  whole list at once - never page them, it is an endless loop.
+- Rate limit: 120 requests / minute per key (HTTP 429 + \`Retry-After\`). Two
+  endpoints have their own, tighter bucket ON TOP of that:
+  \`GET /license-documents/{id}/pdf\` 10 requests / minute per key, because
+  every call renders a PDF, and \`GET /license-keys\` 6 requests / minute per
+  key, because one call costs one licence-service request PER KEY of the
+  account (hundreds on a larger partner). That answer only changes when a key
+  is delivered or a transfer document is issued, so KEEP the response instead
+  of asking again in a loop.
+- Paging: ONLY five endpoints take \`limit\` (1-100) + \`offset\`:
+  \`GET /products\`, \`GET /orders\`, \`GET /invoices\`, \`GET /wallet\`,
+  \`GET /license-documents\`. Only \`GET /products\` and
+  \`GET /license-documents\` return a \`total\`; on the other three page until
+  the array is shorter than \`limit\`. Every OTHER list endpoint
+  (\`GET /keys\`, \`GET /cards\`, \`GET /license-keys\`,
+  \`GET /shipping/parcelshops\`, \`GET /orders/{id}/keys\`) IGNORES those
+  parameters silently and returns the whole list at once - never page them, it
+  is an endless loop.
+- Envelope exception: \`GET /license-documents/{id}/pdf\` answers with raw
+  \`application/pdf\` bytes on SUCCESS (a JSON envelope cannot carry bytes);
+  every FAILURE of it is the normal envelope. It is the only such endpoint.
 - Money is EUR as a JSON number. EVERY amount is NET, with three named
   exceptions: the \`...GrossEur\` fields plus \`displayGrossTotal\` and
   \`feeDeltaEur\` are gross, and \`taxTotalEur\` / \`lineTaxEur\` / \`vatEur\` are
@@ -177,6 +203,31 @@ ${priceContract(
   optionally with an \`Idempotency-Key\` header.
 - \`images\` behaves exactly as described above on every product and variant
   object of \`GET /products\` and \`GET /products/{key}\`.
+
+## Reseller licence transfer documents
+
+If the account is a reseller, it can hand its purchased licences on to its own
+end customers on a white-label transfer document, and read those back over the
+API (issuing them is not part of the read API):
+
+- \`GET /license-keys\` is the stock view: per product \`totalUnits\` /
+  \`allocatedUnits\` / \`remainingUnits\`, and per key \`quantity\` /
+  \`allocated\` / \`remaining\` plus \`orderId\`, \`orderNumber\` and
+  \`orderCreatedAt\`. **There is no \`deliveredAt\`** - the source table has no
+  date column at all, so \`orderCreatedAt\` (the source ORDER's date) is what
+  exists. \`keyValue\` may be \`null\` when the licence service is unreachable;
+  the counts stay correct and a \`null\` is never a placeholder.
+- \`GET /license-documents\` lists the issued documents (summary rows: end
+  customer name, products, quantities, dates). It deliberately carries NO
+  product keys - that is a payload-size choice, not confidentiality.
+- \`GET /license-documents/{id}\` is the full snapshot: the end customer's data
+  and \`items[].keys[]\` with the FULL, unmasked \`keyValue\`. Those come from
+  the stored snapshot, never re-resolved, so an issued document never moves.
+- \`GET /license-documents/{id}/pdf?kind=atruhazas|megsemmisites\` streams the
+  PDF itself.
+
+Every one of these is scoped to the calling account. A document, key or order
+belonging to another partner answers \`not_found\`, never 403.
 
 Full field-level reference (every endpoint, every response field, every error
 code): the \`API.md\` shipped in this package, and https://keypro.hu/api

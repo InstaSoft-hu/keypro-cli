@@ -5,6 +5,8 @@
  * MCP szerver is ezt a klienst hasznalja.
  */
 
+import { filenameFromContentDisposition } from "./download-name.js";
+
 export class KeyproApiError extends Error {
   constructor(
     public status: number,
@@ -114,6 +116,63 @@ export class KeyproClient {
       error.message ?? `Ismeretlen hiba (HTTP ${response.status}).`,
       error.details,
     );
+  }
+
+  /**
+   * BINARIS letoltes: a siker-ag bajtokat ad, a hiba-ag tovabbra is a JSON
+   * boritekbol keszult `KeyproApiError`-t. A ket agat a `Content-Type` valtja
+   * szet, nem a statusz - egy jovobeli binaris vegpont igy ugyanezt kapja.
+   */
+  private async requestBinary(
+    path: string,
+    expectedType: string,
+  ): Promise<{ bytes: Uint8Array; filename: string | null }> {
+    const headers: Record<string, string> = { accept: expectedType };
+    if (this.opts.apiKey) headers.authorization = `Bearer ${this.opts.apiKey}`;
+
+    let response: Response;
+    try {
+      response = await fetch(`${this.opts.apiBase}${path}`, { headers });
+    } catch (err) {
+      throw new KeyproApiError(
+        0,
+        "network_error",
+        `Nem sikerült elérni a szervert (${this.opts.apiBase}): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!contentType.includes(expectedType)) {
+      let payload: unknown;
+      try {
+        payload = await response.json();
+      } catch {
+        throw new KeyproApiError(
+          response.status,
+          "invalid_response",
+          `A szerver nem ${expectedType} és nem JSON választ adott (HTTP ${response.status}).`,
+        );
+      }
+      const error =
+        (payload as { error?: { code?: string; message?: string; details?: unknown } })
+          .error ?? {};
+      throw new KeyproApiError(
+        response.status,
+        error.code ?? "unknown_error",
+        error.message ?? `Ismeretlen hiba (HTTP ${response.status}).`,
+        error.details,
+      );
+    }
+
+    // A fajlnev SZERVER-ADAT, es a hivo fajl-celkent hasznalja: a
+    // `filenameFromContentDisposition` mar megtisztitva adja vissza (egy
+    // konyvtarat elhagyo nev sosem jut ki innen). Lasd `download-name.ts`.
+    return {
+      bytes: new Uint8Array(await response.arrayBuffer()),
+      filename: filenameFromContentDisposition(
+        response.headers.get("content-disposition"),
+      ),
+    };
   }
 
   // --- Auth / kulcsok ---
@@ -304,9 +363,58 @@ export class KeyproClient {
       products: Array<{
         productId: number;
         productName: string;
+        totalUnits: number;
+        allocatedUnits: number;
+        remainingUnits: number;
+        orderCount: number;
         keys: Array<Record<string, unknown>>;
       }>;
     }>("GET", "/api/v1/license-keys");
+  }
+
+  // --- Licenc-atruhazasi dokumentumok (viszontelado -> vegfelhasznalo) ---
+
+  licenseDocumentsList(
+    params: {
+      productId?: number;
+      orderId?: number;
+      status?: "live" | "revoked" | "all";
+      limit?: number;
+      offset?: number;
+    } = {},
+  ) {
+    const qs = new URLSearchParams();
+    if (params.productId) qs.set("productId", String(params.productId));
+    if (params.orderId) qs.set("orderId", String(params.orderId));
+    if (params.status) qs.set("status", params.status);
+    if (params.limit) qs.set("limit", String(params.limit));
+    if (params.offset) qs.set("offset", String(params.offset));
+    const suffix = qs.size > 0 ? `?${qs}` : "";
+    return this.request<{
+      limit: number;
+      offset: number;
+      total: number;
+      documents: Array<Record<string, unknown>>;
+    }>("GET", `/api/v1/license-documents${suffix}`);
+  }
+
+  licenseDocumentGet(id: number) {
+    return this.request<{ document: Record<string, unknown> }>(
+      "GET",
+      `/api/v1/license-documents/${id}`,
+    );
+  }
+
+  /**
+   * A dokumentum PDF-je NYERS BAJTKENT. Ez az egyetlen vegpont, aminek a
+   * SIKERES valasza nem `{ ok, data }` boritek - a hibai viszont igen, ezert
+   * a hibaag ugyanazt a `KeyproApiError`-t adja, mint minden mas hivas.
+   */
+  licenseDocumentPdf(id: number, kind: "atruhazas" | "megsemmisites") {
+    return this.requestBinary(
+      `/api/v1/license-documents/${id}/pdf?kind=${kind}`,
+      "application/pdf",
+    );
   }
 
   // --- Szamlak ---

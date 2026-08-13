@@ -69,12 +69,35 @@ Az `admin` scope **nem kérhető API kulcsként**: a webes kulcskezelő nem is
 ajánlja fel, és `/api/v1` alatt egyetlen végpontot sem elégít ki. Az admin
 hozzáférés külön felület (admin MCP, OAuth vagy szerveren tárolt token).
 
-> **A `read` scope nem ártalmatlan.** A `GET /keys` kilistázza a fiók ÖSSZES
-> API kulcsának azonosítóját, a `DELETE /keys/{id}` pedig bármelyiket
-> visszavonja - nem csak azt, amelyikkel hitelesítettél. Egy `read` kulcs
-> tehát le tud tiltani egy `orders:write` kulcsot, azaz meg tudja bénítani a
-> fiók összes integrációját. Ha egy harmadik félnek adsz ki kulcsot, ezzel
-> számolj.
+> **A `read` scope nem ártalmatlan, és nem csak a saját üzemedet érinti.** Egy
+> `read` kulcs a fiók TELJES olvasó hozzáférése. Amit egyetlen ilyen kulccsal
+> ki lehet olvasni:
+>
+> - **A végfelhasználóid személyes adatai.** A
+>   `GET /license-documents/{id}` és a `/pdf` a kiállított licenc-átruházási
+>   dokumentumot adja vissza, benne a végfelhasználó nevével, címével,
+>   adószámával és kapcsolattartójával. Ez HARMADIK SZEMÉLYEK adata, nem a
+>   tiéd: itt egy kiszivárgott kulcs nem a te rendelkezésre állásodat rontja,
+>   hanem az ügyfeleid adatait teszi ki, ami adatvédelmi incidens.
+> - **A fiók teljes termékkulcs-készlete, maszkolatlanul.** A
+>   `GET /license-keys` EGY hívásban visszaadja az összes kézbesített
+>   termékkulcsot (nagyobb partnernél több száz kulcs), teljes szövegükkel,
+>   plusz azt, hogy melyikből mennyi szabad még.
+> - **A fiók összes API kulcsának letiltása.** A `GET /keys` kilistázza az
+>   azonosítójukat, a `DELETE /keys/{id}` pedig bármelyiket visszavonja - nem
+>   csak azt, amelyikkel hitelesítettél. Egy `read` kulcs tehát le tud tiltani
+>   egy `orders:write` kulcsot, azaz meg tudja bénítani a fiók összes
+>   integrációját.
+>
+> Amit viszont **nem** tud: nem ad le és nem mond vissza rendelést, nem költ
+> pénzt (sem KEP egyenleget, sem kártyát), és nem ír profilt - ezek
+> `orders:write` / `profile:write` scope-ot kérnek. Licenc-dokumentumot
+> kiállítani vagy visszavonni pedig egyetlen scope-pal sem lehet: az API-n a
+> licenc-dokumentumoknak csak OLVASÓ végpontjuk van, kiállítani a webes
+> felületen tudsz.
+>
+> Ha egy harmadik félnek adsz ki kulcsot, ezzel számolj, és adj neki SAJÁT
+> kulcsot: az önmagában visszavonható, a többi integrációd leállítása nélkül.
 
 ### Rate limit
 
@@ -84,6 +107,19 @@ Kulcsonként **120 kérés / 60 másodperc**. Túllépésnél HTTP 429,
 
 A bejelentkezés külön, szigorúbb korláton van: 5 kísérlet / perc
 (IP + email párra) és 20 kísérlet / óra (IP-re).
+
+Két végpontnak **saját, szűkebb kerete** van. Mindkettő a 120-as általánoson
+**felül** fogy, tehát mindig a szűkebb lép életbe:
+
+| Végpont | Keret | Miért |
+| --- | --- | --- |
+| `GET /license-documents/{id}/pdf` | **10** kérés / 60 mp | minden hívása egy PDF-generálást indít, ami nagyságrendekkel drágább egy JSON válasznál |
+| `GET /license-keys` | **6** kérés / 60 mp | egy hívás ára a te kulcsaid SZÁMÁVAL nő: kulcsonként egy külön kérés megy a licencszolgáltatáshoz (nagyobb partnernél több száz), amit az általános keret nem modellez |
+
+A `GET /license-keys` válasza csak akkor változik, ha új kulcs érkezik vagy új
+átruházási dokumentum készül, tehát a 10 másodperces frissítés bőven sűrűbb,
+mint amit az adat indokol. Ha egy ügynök ciklusban hívja, **tárold el a
+választ** ahelyett, hogy újrakérnéd.
 
 ---
 
@@ -108,6 +144,13 @@ Hiba:
   változhat.
 - `error.details` csak akkor van jelen, ha az adott hibához tartozik
   többletadat (lásd a táblázatot).
+
+**Egyetlen kivétel van, és az is csak a SIKER ágon**: a
+`GET /license-documents/{id}/pdf` sikeres válasza nyers `application/pdf`
+bájtfolyam, boríték nélkül (a JSON boríték bájtokat nem tud vinni). Minden
+HIBÁJA - 401, 403, 404, 429 - ugyanaz a `{ ok: false, error }` boríték, mint
+mindenhol máshol. A gyakorlati szabály: ha a válasz `Content-Type`-ja
+`application/pdf`, a törzs a fájl; minden más esetben boríték jön.
 
 ### Hibakódok
 
@@ -145,7 +188,7 @@ Hiba:
 
 ## Lapozás
 
-**Négy végpont lapozható**, és csak ezek fogadják a `limit` + `offset` query
+**Öt végpont lapozható**, és csak ezek fogadják a `limit` + `offset` query
 paramétert (a válaszban vissza is küldik mindkettőt):
 
 | Végpont | `limit` alapérték | `limit` korlát | `offset` |
@@ -154,10 +197,12 @@ paramétert (a válaszban vissza is küldik mindkettőt):
 | `GET /api/v1/orders` | `25` | 1-100 | `0`, >= 0 |
 | `GET /api/v1/invoices` | `25` | 1-100 | `0`, >= 0 |
 | `GET /api/v1/wallet` | `25` | 1-100 | `0`, >= 0 |
+| `GET /api/v1/license-documents` | `25` | 1-100 | `0`, >= 0 |
 
-**`total` mezőt egyedül a `GET /products` ad** (a teljes szűrt találathalmaz
-mérete a lapozás előtt). A másik három lapozható lista darabszámot nem küld:
-ott addig lapozz, amíg a tömb rövidebb nem lesz a `limit`-nél.
+**`total` mezőt a `GET /products` és a `GET /license-documents` ad** (a teljes
+szűrt találathalmaz mérete a lapozás előtt). A másik három lapozható lista
+darabszámot nem küld: ott addig lapozz, amíg a tömb rövidebb nem lesz a
+`limit`-nél.
 
 **A többi listázó végpont NEM lapozható**, és a `limit` / `offset` paramétert
 CSENDBEN figyelmen kívül hagyja: egyben adja vissza a teljes listát, tehát a
@@ -248,8 +293,18 @@ A szerződés pontjai:
 4. Az `alt` `string` vagy `null`; 300 karakternél hosszabb szöveg csonkolva
    érkezik.
 5. **Nincs külön `image` vagy `imageUrl` skalármező** egyik végponton sem.
-6. A változat (variant) **saját** képeket kap, nem örökli a csoportét; a
-   termék-részletező `group` hivatkozás-objektuma szándékosan nem hoz képet.
+6. **A változat (variant) örökli a csoportja képeit, ha nincs sajátja.** A
+   sorrend: ha a változatnak van legalább egy kiszolgálható saját képe, azt (és
+   CSAK azt) kapod - a csoport képei nem fűződnek mögé. Ha egy sincs, a
+   `images` a CSOPORT képeivel jön, változatlan `position` értékekkel, a 2.
+   pont szűrése után (tehát ott is `images[0]` a főkép a kiszolgálhatók közül).
+   Visszafelé nincs öröklés: a csoport sosem veszi át egy változata képét.
+   **Ezért egy változaton kapott kép a csoportot is ábrázolhatja** - ma a
+   változatok nem néznek ki másképp (a "10 db" és a "25 db" ugyanaz a matrica),
+   de ha a saját képre van szükséged, a `GET /products/{key}` `groupProductId`
+   mezőjéből tudod, hogy változat-sort nézel. A termék-részletező `group`
+   hivatkozás-objektuma továbbra sem hoz képet: a képnek egy helye van a
+   válaszban, a termék `images` tömbje.
 
 ---
 
@@ -435,7 +490,13 @@ Query: `status` (`pending`, `processing`, `on-hold`, `completed`,
 ### `GET /api/v1/orders/{id}` - scope: `read`
 
 `data`: `order`, `invoices[]`, `paymentUrl` (csak nyitott kártyás fizetésnél,
-egyébként `null`).
+egyébként `null`), `licenseDocuments[]`.
+
+A `licenseDocuments[]` az EBBŐL a rendelésből merítő, általad kiállított
+licenc-átruházási dokumentumok **összefoglaló** alakja (ugyanaz a sor, mint a
+`GET /license-documents` listán, termékkulcsok nélkül). Egy dokumentum akkor
+kerül ide, ha ez a rendelés az elsődleges forrása, VAGY ha valamelyik tétele
+ebből a rendelésből származó kulcsot köt le.
 
 A rendelés-részletező a lista mezőin túl: `items[]` (`id`, `productId`,
 `name`, `qty`, `unitNetEur`, `lineNetEur`, `lineTaxEur`), `billing`,
@@ -475,9 +536,95 @@ Figyelem: a `wallet` és a `stripe` irány **valódi pénzt mozgat**.
 
 ### `GET /api/v1/license-keys` - scope: `read`
 
-A fiók összes kiszállított termékkulcsa, termékenként csoportosítva.
+A fiók összes kézbesített termékkulcsa, termékenként csoportosítva, a
+**továbbadási (allokációs) számokkal** együtt. Ez a viszonteladói készlet
+nézete: mennyi jött be, mennyit adtál már tovább végfelhasználónak kiállított
+licenc-átruházási dokumentumon, és mennyi maradt szabadon.
 
-`data`: `products[]` → `{ productId, productName, keys: [{ keyValue, orderId, orderNumber, deliveredAt }] }`.
+`data`: `products[]`, ahol egy termék:
+`{ productId, productName, totalUnits, allocatedUnits, remainingUnits, orderCount, keys[] }`,
+egy kulcs pedig
+`{ keyId, keyValue, quantity, allocated, remaining, orderId, orderNumber, orderCreatedAt }`.
+
+- `quantity` a kulcs teljes darabszáma (egy MAK / volumen kulcs több
+  aktiválást hordoz), `allocated` az ebből már dokumentált, `remaining` a
+  szabad.
+- `keyId` a licencszolgáltatás sorazonosítója - ezt add meg a dokumentumok
+  `items[].keys[].keyId` mezőjével összepárosítva.
+- **`keyValue` lehet `null`**: a darabszámok tisztán az adatbázisból jönnek, a
+  kulcs SZÖVEGÉT viszont a licencszolgáltatás oldja fel. Ha az épp nem
+  elérhető, a `keyValue` `null` lesz, de a `quantity` / `allocated` /
+  `remaining` változatlanul helyes. Helyőrző szöveg soha nem jön - a `null`
+  megbízhatóan azt jelenti, hogy nincs adat.
+
+**A `deliveredAt` mező megszűnt, és nincs azonos nevű utódja.** A kulcsok
+forrástáblájában (`license_refs`) nincs egyetlen dátumoszlop sem, tehát a
+kézbesítés ideje ebből a forrásból nem mondható meg. Helyette
+**`orderCreatedAt`** áll: a forrás-rendelés keltezése, ISO 8601 stringként.
+Szándékosan nem ugyanaz a név: egy mező nem mérhet mást, mint amit a neve ígér.
+Aki eddig `deliveredAt`-re kötött, `orderCreatedAt`-re álljon át, és tudja,
+hogy az a RENDELÉS dátuma.
+
+**Külön, szűkebb kerete van: kulcsonként 6 kérés / perc** (lásd Rate limit).
+Egy hívás kulcsonként egy külön kérést indít a licencszolgáltatás felé, tehát
+az ára a te kulcsaid számával nő. Tárold el a választ: csak akkor változik, ha
+új kulcs érkezik vagy új átruházási dokumentum készül.
+
+### `GET /api/v1/license-documents` - scope: `read`
+
+Az általad kiállított licenc-átruházási dokumentumok listája (legújabb elöl).
+
+Query: `productId`, `orderId`, `status` (`live` | `revoked` | `all`,
+alapértelmezés `live`), `limit`, `offset`.
+
+`data`: `limit`, `offset`, `total`, `documents[]`. Egy sor: `id`,
+`documentNumber`, `orderId` (az elsődleges forrás-rendelés), `status`
+(`live` | `revoked`), `customerName`, `totalQty`, `items[]`
+(`productId`, `productName`, `qty`), `createdAt`, `revokedAt`.
+
+Az `orderId` szűrő ugyanazt a szabályt használja, mint a `GET /orders/{id}`
+`licenseDocuments` mezője: a rendelés lehet az elsődleges forrás VAGY
+szerepelhet valamelyik tétel kulcs-allokációjában.
+
+**A listán nincsenek termékkulcsok** (`items[].keys[]`). Ez méret-döntés, nem
+bizalmi: a kulcsokat a részletező maszk nélkül kiadja. Élesben 1253 dokumentum
+van, és egy `limit=100`-as lap kulcsostul olyan tömeg, amit felesleges átvinni.
+Ha kulcs kell, kérd el az egy dokumentumot.
+
+### `GET /api/v1/license-documents/{id}` - scope: `read`
+
+Egy kiállított dokumentum TELJES pillanatképe.
+
+`data`: `{ document }`, a lista mezőin túl: `includeKeys`, `customer`
+(`name`, `taxNumber`, `postcode`, `city`, `addressLine`, `contact` - a
+végfelhasználó adatai a kiállítás pillanatában, hiányzó mező `null`),
+`items[]` a `keys[]` tömbbel (`keyId`, `keyValue`, `qty`, `orderId`,
+`orderNumber`), és `pdf` (`atruhazas`, `megsemmisites` - a két letöltési cím).
+
+A `keyValue` a **teljes, maszkolatlan termékkulcs**, és itt sosem `null`: a
+tárolt pillanatképből jön, nem a licencszolgáltatásból. Egy későbbi kulcscsere
+vagy szolgáltatás-kiesés nem írja át visszamenőleg a már kiállított iratot.
+
+A `pdf` mezőben lévő címek **nem** képesség-linkek (ellentétben a bizonylatok
+`downloadUrl`-jével): API kulcsot kérnek, ugyanúgy, mint minden más végpont.
+
+Idegen dokumentum `not_found`-ot ad, nem 403-at.
+
+### `GET /api/v1/license-documents/{id}/pdf` - scope: `read`
+
+A dokumentum PDF-je. Query: `kind` = `atruhazas` (átruházási igazolás,
+alapértelmezés) vagy `megsemmisites` (megsemmisítési nyilatkozat); bármi más
+`not_found`.
+
+**Ez az API egyetlen olyan végpontja, amelynek a SIKERES válasza nem JSON
+boríték**: HTTP 200 esetén a törzs nyers `application/pdf`, a fájlnév a
+`Content-Disposition` fejlécben van. Minden hibája (401, 403, 404, 429)
+ugyanaz a `{ ok: false, error }` boríték. Külön, szűkebb kerete van:
+kulcsonként 10 kérés / perc (lásd Rate limit).
+
+Migrált, régi szállítólevél esetén az EREDETI PDF jön vissza, nem a mai
+sablonból újragenerált változat; visszavont dokumentum a mai sablont kapja,
+VISSZAVONVA jelzéssel.
 
 ### `GET /api/v1/invoices` - scope: `read`
 
