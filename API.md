@@ -59,11 +59,31 @@ Egy kulcs egy vagy több jogosultságot kap. **Nincs implicit kiterjesztés**: a
 `orders:write` nem ad `read`-et és fordítva; minden végpont pontosan egy
 scope-ot követel.
 
-| Scope | Mit enged |
-| --- | --- |
-| `read` | minden olvasó végpont, az **előnézetek** (`POST /orders/preview`, `POST /orders/{id}/payment/preview`) és a fiók **bármely** API kulcsának visszavonása (`DELETE /keys/{id}`) |
-| `orders:write` | rendelés leadása, visszamondása, fizetési mód módosítása |
-| `profile:write` | `PATCH /profile` |
+A harmadik oszlop azt mondja meg, hogy a `keypro login` (`POST /auth/login`)
+kért lista nélkül megadja-e a scope-ot. Ami `nem`, azt **kérni kell**: sorold
+fel a `scopes` mezőben, vagy pipáld be a weben, a `/api` oldal kulcs-készítő
+űrlapján - ott sincs alapból bejelölve.
+
+| Scope | Mit enged | `keypro login` alapból |
+| --- | --- | --- |
+| `read` | minden olvasó végpont, az **előnézetek** (`POST /orders/preview`, `POST /orders/{id}/payment/preview`) és a fiók **bármely** API kulcsának visszavonása (`DELETE /keys/{id}`) | igen |
+| `orders:write` | rendelés leadása, visszamondása, fizetési mód módosítása | igen |
+| `profile:write` | `PATCH /profile` | igen |
+| `licenses:write` | licenc-átruházási dokumentum **kiállítása** (`POST /license-documents`) és **visszavonása** (`DELETE /license-documents/{id}`) | nem |
+
+A `licenses:write` **egyetlen scope a két műveletre**, szándékosan. Ha előbb
+csak kiállítani engedne, és a visszavonás később kerülne bele, akkor a MÁR
+KIADOTT kulcsok jelentése változna meg utólag - egy jogosultság az első naptól
+ugyanazt jelenti.
+
+Azért nem alapértelmezés, mert **éles termékkulcs-készletbe ír**: minden
+kiállítás valódi kulcsokat köt le és eléget egy dokumentumszámot. Egy ilyen
+jogosultság nem lehet egy bejelentkezés mellékterméke.
+
+Ugyanezért **a távoli MCP kapcsolat OAuth folyamatában sem kérhető**: ott nincs
+külön engedélyező képernyő, ahol bepipálhatnád, tehát a `licenses:write` egy
+`/mcp` tokenre egyáltalán nem adható ki. Ha egy ügynöknek dokumentumot kell
+kiállítania, készíts neki API kulcsot a `/api` oldalon.
 
 Az `admin` scope **nem kérhető API kulcsként**: a webes kulcskezelő nem is
 ajánlja fel, és `/api/v1` alatt egyetlen végpontot sem elégít ki. Az admin
@@ -90,14 +110,50 @@ hozzáférés külön felület (admin MCP, OAuth vagy szerveren tárolt token).
 >   integrációját.
 >
 > Amit viszont **nem** tud: nem ad le és nem mond vissza rendelést, nem költ
-> pénzt (sem KEP egyenleget, sem kártyát), és nem ír profilt - ezek
-> `orders:write` / `profile:write` scope-ot kérnek. Licenc-dokumentumot
-> kiállítani vagy visszavonni pedig egyetlen scope-pal sem lehet: az API-n a
-> licenc-dokumentumoknak csak OLVASÓ végpontjuk van, kiállítani a webes
-> felületen tudsz.
+> pénzt (sem KEP egyenleget, sem kártyát), nem ír profilt, és nem állít ki és
+> nem von vissza licenc-dokumentumot - ezek `orders:write`, `profile:write`,
+> illetve `licenses:write` scope-ot kérnek.
+>
+> **A `licenses:write` a legsúlyosabb, amit ki tudsz adni.** Egy ilyen kulccsal
+> bárki, aki hozzájut:
+>
+> - **Idegen névre állít ki jogi iratot.** A `POST /license-documents` a te
+>   nevedben ad átruházási dokumentumot egy tetszőleges végfelhasználónak: a
+>   `customer` mezőt a hívó tölti, mi nem ellenőrizzük, hogy létező cég-e.
+> - **Leköti a készletedet.** Minden kiállítás valódi termékkulcsokat foglal le
+>   a szabad készletedből (FIFO, a legrégebbi rendelésből), és eléget egy
+>   dokumentumszámot. A számot **visszavonás sem adja vissza**.
+> - **Visszavon már kiadott iratot.** A `DELETE /license-documents/{id}` a
+>   dokumentumot `revoked` állapotba teszi, és a letöltött PDF ettől
+>   VISSZAVONVA jelzésű lesz - annál a végfelhasználónál is, aki már megkapta.
+>
+> Amit viszont **nem** tud: egy csak `licenses:write` kulcs egyetlen OLVASÓ
+> végpontot sem ér el. A lista, a részletező és a PDF `read` scope-ot kér, a
+> `DELETE` válasza pedig csak visszavonási elismervény (`id`, `documentNumber`,
+> `status`, `revokedAt`) - se termékkulcs, se végfelhasználói adat.
+>
+> **Egy kijárat mégis van, és tudni kell róla: az idempotencia-visszajátszás.**
+> A `POST /license-documents` `Idempotency-Key`-e **fiók-szintű**, nem
+> kulcs-szintű (az egyedi index a `user_id` + kulcs páron áll). Ha tehát valaki
+> egy `licenses:write` kulccsal olyan `Idempotency-Key`-t küld, amit a fiókod egy
+> KORÁBBI API-hívása már használt, HTTP 200-at kap, `idempotentReplay: true`-val,
+> és a válasz az akkori dokumentum TELJES részletezője - maszkolatlan
+> termékkulccsal és a végfelhasználó adataival. Írás ilyenkor nem történik.
+> (Ez tudatos: kulcs-szintűvé szűkítve egy `keypro login` utáni JOGOS
+> újrapróbálkozás - a bejelentkezés minden alkalommal ÚJ kulcsot ad ki - második
+> dokumentumot állítana ki más kulcshalmazzal és elégetett sorszámmal. Az űrlapon
+> készült dokumentumokat ez az út nem éri el: azok `Idempotency-Key`-e üres.)
+>
+> **Ezért az `Idempotency-Key` legyen VÉLETLEN, például UUID - soha ne
+> üzleti azonosítóból származtatott.** Egy `10030-lic-1` alakú, az ERP-dből
+> képzett kulcs kitalálható, és aki kitalálja, a fiókod MÁSIK végfelhasználójának
+> adatait olvassa ki vele.
 >
 > Ha egy harmadik félnek adsz ki kulcsot, ezzel számolj, és adj neki SAJÁT
 > kulcsot: az önmagában visszavonható, a többi integrációd leállítása nélkül.
+> `licenses:write`-ot csak akkor adj hozzá, ha az adott integrációnak tényleg
+> dokumentumot kell kiállítania - és `read`-et csak akkor, ha tényleg olvasnia
+> is kell.
 
 ### Rate limit
 
@@ -108,13 +164,19 @@ Kulcsonként **120 kérés / 60 másodperc**. Túllépésnél HTTP 429,
 A bejelentkezés külön, szigorúbb korláton van: 5 kísérlet / perc
 (IP + email párra) és 20 kísérlet / óra (IP-re).
 
-Két végpontnak **saját, szűkebb kerete** van. Mindkettő a 120-as általánoson
+Három végpontnak **saját, szűkebb kerete** van. Mindegyik a 120-as általánoson
 **felül** fogy, tehát mindig a szűkebb lép életbe:
 
 | Végpont | Keret | Miért |
 | --- | --- | --- |
 | `GET /license-documents/{id}/pdf` | **10** kérés / 60 mp | minden hívása egy PDF-generálást indít, ami nagyságrendekkel drágább egy JSON válasznál |
 | `GET /license-keys` | **6** kérés / 60 mp | egy hívás ára a te kulcsaid SZÁMÁVAL nő: kulcsonként egy külön kérés megy a licencszolgáltatáshoz (nagyobb partnernél több száz), amit az általános keret nem modellez |
+| `POST /license-documents` | **6** kérés / 60 mp | ugyanaz a költség: a kért termékek minden kulcsára külön kérés megy a licencszolgáltatáshoz. Ráadásul minden sikeres hívás valódi készletet köt le és eléget egy dokumentumszámot |
+
+A három keret **külön** vödör: a kulcslista lekérdezése nem fogyasztja a
+kiállításét, és fordítva. A `DELETE /license-documents/{id}` nincs köztük -
+az két adatbázis-művelet, külső hívás nélkül, tehát az általános 120-as keret
+alatt van.
 
 A `GET /license-keys` válasza csak akkor változik, ha új kulcs érkezik vagy új
 átruházási dokumentum készül, tehát a 10 másodperces frissítés bőven sűrűbb,
@@ -179,6 +241,11 @@ mindenhol máshol. A gyakorlati szabály: ha a válasz `Content-Type`-ja
 | `stripe_unavailable` | 502 | a kártyás fizetés szolgáltatója nem elérhető |
 | `order_not_cancelable` | 409 | a rendelés ebben az állapotban nem mondható vissza |
 | `order_not_changeable` | 409 | a rendelés fizetési módja már nem módosítható |
+| `item_not_allowed` | 400 | a tétel MAGA nem adható ki: MAR licencről nem készül átruházási dokumentum, vagy többet kértél, mint a termék szabad készlete |
+| `no_transferable_keys` | 400 | a kért termékből nincs kézbesített termékkulcsod, amiből dokumentum készülhetne |
+| `license_service_unavailable` | 503 | VAN kézbesített kulcsod, de a termékkulcsokat kiszolgáló rendszer épp nem oldotta fel a szövegüket - próbáld újra néhány perc múlva |
+| `lock_busy` | 409 | egy másik dokumentum-kiállításod épp fut ugyanezen a fiókon; `Retry-After` fejléc, ismételd UGYANAZZAL az `Idempotency-Key`-jel |
+| `allocation_changed` | 409 | időközben elfogyott a lefoglalni kívánt készlet; `details.items[]` = `{ productId, remainingUnits }` |
 | `account_pending` | 403 | a fiók még jóváhagyásra vár (bejelentkezés) |
 | `account_inactive` | 403 | a fiók le van tiltva (bejelentkezés) |
 | `invalid_credentials` | 401 | rossz email vagy jelszó (bejelentkezés) |
@@ -319,8 +386,13 @@ Discovery, auth nélkül. `data`: `name`, `version`, `docs`, `auth`.
 Auth nélkül. Email + jelszó → friss API kulcs.
 
 Törzs: `email` (kötelező), `password` (kötelező), `name` (kulcs neve,
-alapértelmezés `"CLI login"`, max 80), `scopes` (alapértelmezés: mind a három
-kiadható scope).
+alapértelmezés `"CLI login"`, max 80), `scopes`. A `scopes` **bármelyik
+kiadható scope-ot elfogadja tételes felsorolással, a `licenses:write`-ot is**;
+az ALAPÉRTELMEZÉS viszont a `licenses:write` NÉLKÜLI három (`read`,
+`orders:write`, `profile:write`), tehát kérni kell, magától nem jön. Ugyanez a
+tudatos gesztus a másik két minta-úton: az `/api` lap űrlapján a jelölőnégyzet
+alapból üres, az OAuth / DCR úton pedig egyáltalán nem kérhető. Lásd a Scope-ok
+szakaszt.
 
 `data`: `token` (a nyers kulcs - **csak itt látszik**), `keyId`, `prefix`,
 `scopes`, `name`.
@@ -343,12 +415,24 @@ Hibák: `invalid_credentials`, `account_pending`, `account_inactive`,
   `city`, `postcode`, `state`, `country`, `email`, `phone`
 - `shipping`: ugyanaz, `email` nélkül
 
+A felsorolás teljes. A `PATCH /profile` törzsében elfogadott
+`licenseDocsIncludeKeys` szándékosan **nincs** a válaszban: ez a
+licenc-dokumentum kiállító űrlapjának alapértelmezése (lásd
+**Licenc-dokumentumok - a modell**), nem törzsadat. Írni tehát az API-ról tudod,
+visszaolvasni nem - ha az értékre szükséged van, tartsd nyilván a saját
+oldaladon.
+
 ### `PATCH /api/v1/profile` - scope: `profile:write`
 
 Törzs: a lapos mezőnevek (`firstName`, `phone`, `website`, `companyName`,
 `taxNumber`, `billingCity`, `shippingPostcode`, ... ) részhalmaza, plusz a
 `noteOnInvoice` és `licenseDocsIncludeKeys` logikai kapcsolók. Üres string
 (`""`) → `null`. A bejelentkezési email itt **nem** módosítható.
+
+A `licenseDocsIncludeKeys` a licenc-dokumentum kiállító űrlapjának
+alapértelmezését állítja (részletesen: **Licenc-dokumentumok - a modell**).
+Szerepel az `updated` tömbben, ha küldted, a friss `profile`-ban viszont nem
+jelenik meg, mert a `GET /profile` sem adja vissza.
 
 `data`: `updated` és a friss `profile`. Az `updated` a kérésben ELFOGADOTT
 mezők neve (amit ismert mezőként küldtél), **nem** a ténylegesen megváltozott
@@ -474,7 +558,7 @@ Fizetési módok:
 | `bacs` | átutalás: a rendelés `on-hold`, díjbekérő készül, kulcs a beérkezés után |
 | `cheque` | 8 napos fizetési határidő (+5% díj a nettó termékösszegre) |
 | `cod` | utánvét, csak fizikai kiszállításnál (+1,5 EUR) |
-| `wallet` | KEP egyenleg, azonnal terhelődik |
+| `wallet` | KEP egyenleg, azonnal terhelődik; ilyen rendelésről számla NEM készül, csak szállítólevél (az egyenleget a feltöltéskor számláztuk) |
 | `stripe` | mentett bankkártya (off-session) |
 
 ### `GET /api/v1/orders` - scope: `read`
@@ -570,6 +654,130 @@ Egy hívás kulcsonként egy külön kérést indít a licencszolgáltatás fel�
 az ára a te kulcsaid számával nő. Tárold el a választ: csak akkor változik, ha
 új kulcs érkezik vagy új átruházási dokumentum készül.
 
+### Licenc-dokumentumok - a modell
+
+A következő öt szakasz (`GET /license-documents`,
+`POST /license-documents`, `GET /license-documents/{id}`,
+`DELETE /license-documents/{id}`, `GET /license-documents/{id}/pdf`) a
+licenc-átruházási dokumentumok TELJES API-felülete.
+
+**Olvasni `read` scope-pal lehet, kiállítani és visszavonni `licenses:write`
+scope-pal.** Nincs implicit kiterjesztés egyik irányban sem: egy `read` kulcs
+nem állít ki és nem von vissza semmit, egy `licenses:write` kulcs pedig egyetlen
+OLVASÓ VÉGPONTOT sem ér el. (Pontosan ennyit jelent, és nem többet: a végpontok
+zárva vannak, de az `Idempotency-Key` visszajátszásán át egy `licenses:write`
+kulcs mégis kiolvashat egy dokumentumot - lásd lentebb.) Ugyanez a Scope-ok
+szakaszban is szerepel; itt azért áll még egyszer, mert integráláskor ez a rész
+kerül a szemed elé.
+
+Amit egy `licenses:write` kulcs visszakap, az a **saját hívásának eredménye**,
+nem egy lekérdezés - EGY kivétellel, amit lentebb ki is mondunk: az
+`Idempotency-Key` visszajátszása fiók-szintű. A két rendes ág:
+
+- a `POST` válasza a most kiállított dokumentum TELJES alakja, kulcsostul -
+  éppen azért, mert ezeket a termékkulcsokat kell továbbadnod a
+  végfelhasználódnak;
+- a `DELETE` válasza **visszavonási elismervény**: `id`, `documentNumber`,
+  `status`, `revokedAt`. Termékkulcsot és végfelhasználói adatot NEM tartalmaz.
+  Az elismervény a MEGSZÓLÍTOTT dokumentumot azonosítja - te az `id`-t küldted
+  be, a `documentNumber` az ahhoz tartozó emberi iratszám, a `revokedAt` pedig a
+  visszavonás ideje -, ezért az `alreadyRevoked` ágon (ahol nem történik írás) is
+  ugyanez a négy mező jön: egy megismételt kérésnek is iktatható válasz kell.
+
+Ha a tartalmat akarod olvasni - a listát, a részletezőt vagy a PDF-et -, `read`
+scope kell hozzá.
+
+**Egy kivétel van, és szándékosan hagytuk így: az idempotencia-visszajátszás
+fiók-szintű.** Egy azonos `Idempotency-Key`-jel küldött `POST` a KORÁBBI
+dokumentumot adja vissza teljes részletezővel, akkor is, ha azt a fiókod egy
+MÁSIK API kulcsa állította ki (`idempotentReplay: true`, HTTP 200, írás nélkül).
+Vagyis egy `licenses:write` kulcs a fiók bármely, API-ból kiállított
+dokumentumát ki tudja olvasni, HA ismeri az akkor használt `Idempotency-Key`-t.
+Ezért az a kulcs legyen véletlen (UUID) - a részleteket és az indoklást lásd a
+Scope-ok szakasz `licenses:write` figyelmeztetésénél és az
+`Idempotency-Key` alszakasznál.
+
+**Ami az API-n NINCS: kézi kulcsválasztás.** A weben előbb látod a rendszer
+FIFO javaslatát, és le is cserélheted a saját szabad kulcsaidra
+(`/licenc-dokumentacio/uj`); az API-n a kulcsokat mindig a FIFO választja, és a
+kérésnek nincs `keyIds` mezője. Ha egy konkrét termékkulcsot akarsz átruházni,
+azt a webes felületen tudod.
+
+#### A dokumentum és a rendelés kapcsolata
+
+A termékkulcsokat termék-poolból, FIFO sorrendben (a legrégebbi rendelés
+kulcsával kezdve) kötjük le, ezért a **rendelés-hivatkozás kulcsonként áll**: ha
+egy rendelésből származó kulcs elfogy, a következő darab már a következő
+rendelés kulcsából jön. Egy dokumentum így több rendelésből is meríthet.
+
+A rendelés két helyen jelenik meg:
+
+- `orderId` a dokumentum gyökerén (a listán és a részletezőn is): az
+  **elsődleges forrás-rendelés**. Mindig egyetlen szám, mindig ki van töltve, és
+  mindig szerepel valamelyik tétel kulcs-allokációjában is. Arra tehát
+  számíthatsz, hogy a rendelés VALÓBAN forrása a dokumentumnak - arra nem, hogy
+  ő a legrégebbi.
+- `items[].keys[].orderId` + `orderNumber` (csak a részletezőn): az adott
+  termékkulcs saját forrás-rendelése. A teljes rendelés-lista itt áll.
+
+A kapcsolat **mindkét irányban több-a-többhöz**: egy rendeléshez több
+dokumentum tartozhat (több részletben ruházol át), és egy dokumentum több
+rendelésből meríthet (a fenti FIFO miatt). Ne kezeld tehát az `orderId`-t
+egyedi kulcsként, és ne feltételezd, hogy egy dokumentum egyetlen rendeléshez
+tartozik.
+
+Ezért az `orderId` szűrő **mindkét esetet megtalálja**: egy dokumentum akkor
+kerül a találatok közé, ha a megadott rendelés az elsődleges forrása VAGY ha
+szerepel valamelyik tétel kulcs-allokációjában. Ugyanez a szabály adja a
+`GET /orders/{id}` `licenseDocuments[]` mezőjét is.
+
+**A szabály közös, a két halmaz mégsem azonos**, mert a visszavont
+dokumentumokat máshogy kezelik. A `GET /orders/{id}` `licenseDocuments[]` a
+rendelésből merítő MINDEN dokumentumot viszi, a visszavontakat is (a `status`
+és a `revokedAt` mezőből látszik, melyik melyik); a lista viszont
+alapértelmezésben csak az élőket adja, mert a `status` alapértelmezése `live`.
+A két halmaz akkor egyezik meg, ha a listát `?orderId=X&status=all` alakban
+kéred - a lapozást (`limit`, `offset`) figyelembe véve, mert a
+rendelés-részletező nem lapoz.
+
+#### `includeKeys`: mit kapcsol, és mit NEM
+
+Két külön dolog visel hasonló nevet:
+
+- `licenseDocsIncludeKeys` a **profilon** (`PATCH /profile`, a weben
+  `/edit-account`): partner-szintű ALAPÉRTELMEZÉS, **alapból bekapcsolva**.
+  Egyetlen dolgot csinál: megmondja, mi legyen az érték, ha kiállításkor nem
+  rendelkezel róla - a weben ettől van eleve bepipálva az "A termékkulcsok is
+  jelenjenek meg a dokumentumon" jelölő, az API-n pedig ez dönt, ha a
+  `POST /license-documents` törzsében nem küldesz `includeKeys` mezőt (egy
+  explicit `false` teljes értékű válasz, nem hiány, tehát felülírja). Ugyanez
+  igaz mindkét felületen: kiállításkor dokumentumonként felülírható, és az
+  átállítása **visszamenőleg semmit nem változtat** a már kiállított
+  dokumentumokon.
+- `includeKeys` a **dokumentumon** (a részletező válaszában): a kiállítás
+  pillanatában érvényes érték PILLANATKÉPE. A megjelenítést ez dönti el.
+
+Amit a dokumentum `includeKeys` mezője befolyásol: megjelenik-e a
+termékkulcs-oszlop a letöltött PDF-en (`/pdf`, mindkét irattípuson) és a
+partner saját webes dokumentum-oldalán. Migrált, régi szállítólevélnél a PDF
+csak az ÉLŐ **átruházási** iraton az eredeti tárolt fájl, tehát ott nincs
+hatása; a megsemmisítési nyilatkozat (`?kind=megsemmisites`) és a visszavont
+migrált irat a mai sablonból készül, ahol számít. A webes táblázatra mindig
+van hatása.
+
+Az alapértelmezés azért bekapcsolt, hogy a végfelhasználó a papíron lássa,
+MELYIK termékkulcsot kapta, és később össze tudja vetni a gépén aktivált
+kulccsal. Akkor érdemes kikapcsolni, ha a végfelhasználónak nem akarod a
+papírra írni a kulcsot (például magad telepítesz, és a kulcsot külön adod át).
+
+**Az API válaszát viszont NEM befolyásolja.** A `GET /license-documents/{id}` a
+termékkulcsokat MINDIG, maszkolatlanul visszaadja, `includeKeys: false` mellett
+is; a lista pedig SOSEM viszi a kulcsokat, `includeKeys: true` mellett sem (az
+méret-döntés, lásd ott). A kapcsoló tehát a papírt szabályozza, nem az API-t: ha
+egy integrációtól akarod elrejteni a termékkulcsokat, ezzel nem tudod. Az összes
+olvasó végpont ugyanazt a `read` scope-ot kéri, tehát aki `read` kulcsot kap,
+a kulcsokat is látja (lásd a Scope-ok szakasz figyelmeztetését).
+
 ### `GET /api/v1/license-documents` - scope: `read`
 
 Az általad kiállított licenc-átruházási dokumentumok listája (legújabb elöl).
@@ -591,6 +799,97 @@ bizalmi: a kulcsokat a részletező maszk nélkül kiadja. Élesben 1253 dokumen
 van, és egy `limit=100`-as lap kulcsostul olyan tömeg, amit felesleges átvinni.
 Ha kulcs kell, kérd el az egy dokumentumot.
 
+### `POST /api/v1/license-documents` - scope: `licenses:write`
+
+Licenc-átruházási dokumentum **kiállítása** a saját végfelhasználódnak.
+
+**Ez éles készletbe ír.** A hívás valódi termékkulcsokat köt le a szabad
+készletedből, eléget egy dokumentumszámot (amit visszavonás sem ad vissza), és
+azonnal letölthető PDF-et hoz létre. Nincs külön előnézet-lépés: a
+`GET /license-keys` mutatja meg előre, miből mennyi szabad.
+
+Törzs:
+
+```json
+{
+  "customer": {
+    "name": "Példa Kft.",
+    "taxNumber": "12345678-2-41",
+    "postcode": "1051",
+    "city": "Budapest",
+    "addressLine": "Fő utca 1.",
+    "contact": "Kovács Anna"
+  },
+  "items": [{ "productId": 29, "qty": 3 }],
+  "includeKeys": true
+}
+```
+
+- `customer.name` **kötelező** (2-200 karakter), a többi mező opcionális
+  (`taxNumber` 50, `postcode` 20, `city` 100, `addressLine` 200, `contact` 200
+  karakterig). A hosszabb érték **hiba**, nem csonkolás.
+- `items[]`: legalább 1, legfeljebb 50 tétel. Ugyanaz a `productId` **kétszer
+  nem szerepelhet** (`validation_failed`) - vond össze egy sorba.
+- `includeKeys` opcionális: szerepeljen-e a termékkulcs a kiállított PDF-en.
+  Ha **hiányzik**, a fiókod beállítása dönt; egy explicit `false` felülírja azt.
+  (A JSON válasz a kulcsokat mindig viszi, ettől függetlenül.)
+
+**A kulcsválasztás CSAK automatikus FIFO**, és nincs rá kapcsoló: a rendszer a
+legrégebbi rendelésedből származó szabad kulcsokat foglalja. A kérésben
+szándékosan **nincs `keyIds` mező** - kézzel válogatni a webes felületen tudsz,
+ahol előbb látod is a javaslatot.
+
+#### `Idempotency-Key`: itt **KÖTELEZŐ**
+
+Ez **eltér a `POST /orders`-től**, ahol a fejléc opcionális, és tudatos:
+
+- ott egy kulcs nélküli újrapróbálkozás legfeljebb egy második rendelést hoz
+  létre, amit vissza lehet mondani;
+- itt a FIFO miatt a második hívás **MÁS termékkulcsokat** foglalna (az elsőket
+  már lekötötte az első hívás), tehát a végfelhasználód két dokumentumot kapna
+  két külön kulcshalmazzal és két elégetett sorszámmal - ezt csak visszavonással
+  lehet helyrehozni, a sorszámokat pedig sehogy.
+
+A fejléc hiánya `validation_failed` (`details.missing = "Idempotency-Key"`).
+Hossza **8-100 karakter**; a hosszabb szintén `validation_failed`. **A szerver
+NEM vágja le** (szemben a `POST /orders`-szel) - küldj rövid, elöl is eltérő
+kulcsot.
+
+**A kulcs FIÓKONKÉNT egyedi, nem API kulcsonként**: két partner ugyanazt
+használhatja, a te fiókodon belül viszont MINDEN API kulcsod ugyanabba a
+névtérbe ír. Ennek két következménye van:
+
+- a visszajátszás akkor is működik, ha a retry MÁSIK API kulccsal megy - erre
+  szükség is van, mert minden `keypro login` új kulcsot ad ki, és egy kulcs-csere
+  utáni újrapróbálkozás enélkül második dokumentumot állítana ki;
+- **cserébe egy `licenses:write` kulcs, ami ismer egy korábban használt
+  `Idempotency-Key`-t, azt a dokumentumot teljes részletezővel visszakapja** -
+  maszkolatlan termékkulccsal és a végfelhasználó adataival -, `read` scope
+  nélkül is.
+
+**Ezért a kulcs legyen VÉLETLEN (UUID), soha ne üzleti azonosítóból
+származtatott.** Egy `10030-lic-1` alakú, rendelésszámból képzett kulcs
+kitalálható; ha `licenses:write` kulcsot adtál egy harmadik félnek, ő ezzel a
+fiókod MÁSIK végfelhasználójának adatait olvassa ki. Az űrlapon készült
+dokumentumokat ez nem érinti: azoknak nincs `Idempotency-Key`-ük.
+
+Válasz: HTTP **201** új dokumentumnál, **200** idempotens ismétlésnél.
+
+`data`: `document`, `idempotentReplay`. A `document` **pontosan ugyanaz az
+alak**, amit a `GET /license-documents/{id}` ad (ugyanaz a kód állítja elő) -
+benne a `pdf` mezővel, tehát külön letöltési linket nem kell kérned.
+
+Hibák ezen a végponton: `validation_failed` (400), `item_not_allowed` (400),
+`no_transferable_keys` (400), `license_service_unavailable` (503), `lock_busy`
+(409, `Retry-After`), `allocation_changed` (409, `details.items[]`),
+`rate_limited` (429).
+
+**A `lock_busy` és az `allocation_changed` nem ugyanaz.** A `lock_busy` azt
+jelenti, hogy a saját másik kérésed épp ír: várj a `Retry-After` másodpercet, és
+küldd újra UGYANAZZAL az `Idempotency-Key`-jel. Az `allocation_changed` viszont
+elutasítás: időközben elfogyott a készlet, a `details.items[]` megmondja, miből
+mennyi maradt - új kéréssel, kevesebb darabszámmal próbálkozz.
+
 ### `GET /api/v1/license-documents/{id}` - scope: `read`
 
 Egy kiállított dokumentum TELJES pillanatképe.
@@ -604,11 +903,43 @@ végfelhasználó adatai a kiállítás pillanatában, hiányzó mező `null`),
 A `keyValue` a **teljes, maszkolatlan termékkulcs**, és itt sosem `null`: a
 tárolt pillanatképből jön, nem a licencszolgáltatásból. Egy későbbi kulcscsere
 vagy szolgáltatás-kiesés nem írja át visszamenőleg a már kiállított iratot.
+Az `includeKeys` értéke ezen nem változtat: a `keys[]` `false` esetén is
+kimegy, mert az a mező a PDF-et és a webes megjelenítést szabályozza, nem az
+API-t (lásd **Licenc-dokumentumok - a modell**).
 
 A `pdf` mezőben lévő címek **nem** képesség-linkek (ellentétben a bizonylatok
 `downloadUrl`-jével): API kulcsot kérnek, ugyanúgy, mint minden más végpont.
 
 Idegen dokumentum `not_found`-ot ad, nem 403-at.
+
+### `DELETE /api/v1/license-documents/{id}` - scope: `licenses:write`
+
+Egy kiállított dokumentum **visszavonása**. Törzs nincs.
+
+A visszavonás **soft**: a sor nem tűnik el, mert jogi irat, amit a
+végfelhasználód már megkaphatott. Két következménye van:
+
+- a lekötött termékkulcsok **azonnal újra kioszthatóvá válnak** (a
+  `GET /license-keys` `remaining` száma nő);
+- a dokumentum **PDF-je VISSZAVONVA jelzést kap**, és a `status` mezője
+  `revoked` lesz - a `documentNumber` viszont **véglegesen elégett**, azt
+  semmi nem adja vissza.
+
+**A művelet idempotens.** Egy megismételt DELETE ugyanarra az azonosítóra
+szintén HTTP **200**, `alreadyRevoked: true`-val (nem 404 és nem 409): a kívánt
+állapot fennáll, tehát ez nem hiba. Egy elveszett válasz után nyugodtan
+újraküldheted.
+
+`data`: `document`, `alreadyRevoked`. A `document` itt **visszavonási
+elismervény**, nem a dokumentum tartalma - pontosan négy mező: `id`,
+`documentNumber`, `status` (`revoked`) és `revokedAt`. Termékkulcsot és
+végfelhasználói adatot szándékosan nem visz: a visszavonáshoz nem kell, a
+`DELETE` `alreadyRevoked` ága pedig semmit nem ír, tehát a teljes alakkal ez a
+végpont olvasásra lenne használható `read` scope nélkül. A tartalomért kérd el a
+`GET /license-documents/{id}`-t (`read`).
+
+Idegen vagy nem létező dokumentum `not_found`-ot ad (404), nem 403-at.
+Migrált, régi szállítólevél is visszavonható.
 
 ### `GET /api/v1/license-documents/{id}/pdf` - scope: `read`
 

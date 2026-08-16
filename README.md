@@ -57,7 +57,10 @@ keypro login                                 # email + jelszó -> új kulcsot me
 ```
 
 - Kulcsot a weben a fiók **API, MCP és CLI** (`/api`) oldalán készíthetsz,
-  scope-okkal (olvasás / rendelés / profil) és lejárattal.
+  scope-okkal (olvasás / rendelés / profil / licenc-dokumentum) és lejárattal.
+  A `licenses:write` (licenc-dokumentum kiállítása és visszavonása) **nincs
+  alapból bejelölve**, és a `keypro login` sem adja meg magától: éles
+  termékkulcs-készletbe ír, ezért kérni kell.
 - A config a `~/.config/keypro/config.json` fájlban van (0600 jog).
 
 ## Szerver (API cím)

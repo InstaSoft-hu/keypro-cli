@@ -57,7 +57,9 @@ Payment methods (\`--payment\`):
   (dijbekero) is issued; keys are delivered after payment arrives.
 - \`cheque\` 8-day payment terms (+5% fee on net product total).
 - \`cod\`    cash on delivery (physical shipments only, +1.5 EUR fee).
-- \`wallet\` KEP balance (net total deducted immediately).
+- \`wallet\` KEP balance (net total deducted immediately). NO invoice is
+  issued for such an order: the balance was already invoiced when it was
+  topped up, so the order's only document is a delivery note.
 - \`card\`   saved bank card (Stripe, off-session). If the bank requires
   3DS or there is no saved card, the response contains \`payment.paymentUrl\`
   - give this link to the user to open in a browser (valid ~1 hour).
@@ -163,17 +165,30 @@ agent that cannot install npm packages can call it directly.
 - Envelope: \`{ "ok": true, "data": ... }\` or
   \`{ "ok": false, "error": { "code", "message", "details"? } }\`. Key on
   \`error.code\`, never on the Hungarian \`message\`.
-- Scopes: \`read\`, \`orders:write\`, \`profile:write\`. No implicit widening -
-  every endpoint demands exactly one. The \`admin\` scope is never issued as an
-  API key and satisfies nothing under /api/v1.
-- Rate limit: 120 requests / minute per key (HTTP 429 + \`Retry-After\`). Two
+- Scopes: \`read\`, \`orders:write\`, \`profile:write\`, \`licenses:write\`. No
+  implicit widening - every endpoint demands exactly one. The \`admin\` scope is
+  never issued as an API key and satisfies nothing under /api/v1.
+  \`licenses:write\` covers BOTH issuing (\`POST /license-documents\`) and
+  revoking (\`DELETE /license-documents/{id}\`) a licence transfer document; it
+  writes REAL stock, so \`keypro login\` does not grant it unless asked, and the
+  remote-MCP OAuth flow cannot mint it at all (no consent screen there). It
+  reaches NO read endpoint: the list, the detail and the PDF all need \`read\`,
+  and the \`DELETE\` answers with a bare revocation receipt (\`id\`,
+  \`documentNumber\`, \`status\`, \`revokedAt\`). ONE exit exists, and it is
+  deliberate: the \`POST\` idempotency replay is ACCOUNT-scoped, not key-scoped,
+  so an \`Idempotency-Key\` that ANY earlier call of the same account used
+  replays that document IN FULL - unmasked product keys and end-customer data -
+  with no write. Hence the random-key rule under \`POST /license-documents\`
+  below.
+- Rate limit: 120 requests / minute per key (HTTP 429 + \`Retry-After\`). Three
   endpoints have their own, tighter bucket ON TOP of that:
   \`GET /license-documents/{id}/pdf\` 10 requests / minute per key, because
-  every call renders a PDF, and \`GET /license-keys\` 6 requests / minute per
+  every call renders a PDF; \`GET /license-keys\` 6 requests / minute per
   key, because one call costs one licence-service request PER KEY of the
-  account (hundreds on a larger partner). That answer only changes when a key
-  is delivered or a transfer document is issued, so KEEP the response instead
-  of asking again in a loop.
+  account (hundreds on a larger partner); and \`POST /license-documents\` 6
+  requests / minute per key, for the same per-key cost. The \`GET /license-keys\`
+  answer only changes when a key is delivered or a transfer document is issued,
+  so KEEP the response instead of asking again in a loop.
 - Paging: ONLY five endpoints take \`limit\` (1-100) + \`offset\`:
   \`GET /products\`, \`GET /orders\`, \`GET /invoices\`, \`GET /wallet\`,
   \`GET /license-documents\`. Only \`GET /products\` and
@@ -207,8 +222,8 @@ ${priceContract(
 ## Reseller licence transfer documents
 
 If the account is a reseller, it can hand its purchased licences on to its own
-end customers on a white-label transfer document, and read those back over the
-API (issuing them is not part of the read API):
+end customers on a white-label transfer document, and both read and write those
+over the API:
 
 - \`GET /license-keys\` is the stock view: per product \`totalUnits\` /
   \`allocatedUnits\` / \`remainingUnits\`, and per key \`quantity\` /
@@ -225,9 +240,37 @@ API (issuing them is not part of the read API):
   the stored snapshot, never re-resolved, so an issued document never moves.
 - \`GET /license-documents/{id}/pdf?kind=atruhazas|megsemmisites\` streams the
   PDF itself.
+- \`POST /license-documents\` (scope \`licenses:write\`) ISSUES one. Body:
+  \`customer\` (\`name\` required), \`items[]\` of \`{ productId, qty }\`, optional
+  \`includeKeys\`. Key selection is AUTOMATIC FIFO only - there is no \`keyIds\`
+  field. HTTP 201 on success, and \`data.document\` is byte-for-byte the shape
+  \`GET /license-documents/{id}\` returns.
+- The \`Idempotency-Key\` header is MANDATORY here (8-100 chars), unlike on
+  \`POST /orders\` where it is optional: a retry without one would allocate
+  DIFFERENT keys under FIFO, so the end customer would end up with two documents
+  over two key sets and two burnt document numbers. A repeat with the same key
+  answers HTTP 200 and \`idempotentReplay: true\`. An over-long key is a 400, NOT
+  a silent truncation. **Generate it RANDOMLY, as a UUID - never derive it from
+  a business identifier.** The dedup namespace is the ACCOUNT
+  (\`user_id\` + key), not the API key, so the replay hands the FULL document -
+  unmasked product keys and end-customer data - to anyone who can name a key the
+  account used before. A guessable \`10030-lic-1\` shaped key therefore lets a
+  \`licenses:write\`-only holder read ANOTHER end customer's document without
+  \`read\`. Documents made on the web form carry no \`Idempotency-Key\` and are
+  out of reach of this path.
+- \`DELETE /license-documents/{id}\` (scope \`licenses:write\`) REVOKES one. Soft:
+  the row stays, the keys become allocatable again, the PDF is stamped revoked,
+  and the document NUMBER is burnt for good. It is idempotent - a second DELETE
+  is also HTTP 200 with \`alreadyRevoked: true\`, never 404 or 409. \`data.document\`
+  is a RECEIPT, not the document: \`id\`, \`documentNumber\`, \`status\`,
+  \`revokedAt\` - no product keys, no end-customer data. Read those with \`read\`.
 
 Every one of these is scoped to the calling account. A document, key or order
 belonging to another partner answers \`not_found\`, never 403.
+
+Issuing writes REAL stock: every successful \`POST\` locks actual product keys
+out of the free pool and burns a document number that nothing gives back.
+Before issuing, read \`GET /license-keys\` to see what is actually free.
 
 Full field-level reference (every endpoint, every response field, every error
 code): the \`API.md\` shipped in this package, and https://keypro.hu/api
@@ -240,7 +283,9 @@ shipping_required, invalid_parcelshop, cod_requires_physical,
 combine_parent_unavailable, insufficient_wallet_balance,
 wallet_payment_disabled, topup_method_not_allowed, same_payment_method,
 confirm_required, confirm_token_invalid, invalid_card, stripe_unavailable,
-order_not_cancelable, order_not_changeable, account_pending, account_inactive,
+order_not_cancelable, order_not_changeable, item_not_allowed,
+no_transferable_keys, license_service_unavailable, lock_busy,
+allocation_changed, account_pending, account_inactive,
 invalid_credentials, network_error, internal
 
 \`network_error\` is produced by the CLI itself (the shop was unreachable); all

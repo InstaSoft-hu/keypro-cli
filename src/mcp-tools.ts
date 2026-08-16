@@ -23,7 +23,7 @@ export type { KeyproClient, KeyproClientOptions } from "./client.js";
  * (korabban a web 0.1.4-en ragadt). Kiadaskor a package.json-nal egyutt ez az
  * egy konstans valtozik.
  */
-export const KEYPRO_MCP_VERSION = "0.1.9";
+export const KEYPRO_MCP_VERSION = "0.1.10";
 
 /**
  * A szerver `instructions` mezoje (MCP initialize). A kliens modellje ezt latja
@@ -95,7 +95,7 @@ const orderRequestShape = {
   paymentMethod: z
     .enum(["bacs", "cheque", "cod", "wallet", "stripe"])
     .describe(
-      "bacs=bank transfer (proforma first), cheque=8-day terms (+5%), cod=cash on delivery, wallet=KEP balance, stripe=saved card",
+      "bacs=bank transfer (proforma first), cheque=8-day terms (+5%), cod=cash on delivery, wallet=KEP balance (NO invoice for such an order, only a delivery note - the balance is invoiced when it is topped up), stripe=saved card",
     ),
   shippingMethodId: z
     .enum(["gls_hd", "gls_parcelshop", "combine_free"])
@@ -118,7 +118,14 @@ const orderRequestShape = {
     .string()
     .optional()
     .describe(
-      "Your own internal reference / PO number; printed verbatim in the comment field of every invoice of this order",
+      // A MASODIK MONDAT SZO SZERINTI MASOLAT: a bolt oldalan a
+      // `internalReferenceDocumentScope()` (`src/lib/invoicing/build.ts`)
+      // GENERALJA ugyanezt abbol a tablabol, ami a bizonylat `comment` mezojet
+      // tolti. Ez a csomag onalloan publikalt npm modul, innen az a modul nem
+      // importalhato - ezert masolat, es ezert allitja a szerver oldali
+      // `internal-reference.test.ts` SZO SZERINT az egyezoseget. Ha ezt a
+      // mondatot atirod, a teszt PIROS lesz, es a forras a tabla, nem ez a sor.
+      "Your own internal reference / PO number for this order, printed verbatim. It is printed in the comment field of the FINANCIAL documents (proforma, prepayment invoice, final invoice, invoice, correction, storno) and never on the delivery note; a KEP-balance (wallet) order gets no financial document at all, so on such an order the reference is printed on nothing.",
     ),
   cardId: z
     .string()
@@ -329,7 +336,7 @@ export function registerKeyproTools(server: McpServer, client: KeyproClient): vo
       title: "Change payment method",
       annotations: writeHints({ destructive: true, idempotent: false }),
       description:
-        "Change an UNPAID order's payment method. Requires the confirmToken from keypro_order_change_payment_preview. wallet debits the KEP balance now and fulfils; cheque/cod add their fee and fulfil (final invoice + keys where due); bacs issues a proforma (awaits transfer); stripe charges the saved card or returns a payment link in payment.paymentUrl. Pass cardId (pm_...) to pick a specific card for stripe.",
+        "Change an UNPAID order's payment method. Requires the confirmToken from keypro_order_change_payment_preview. wallet debits the KEP balance now and fulfils, and raises NO invoice for the order (the balance was already invoiced when it was topped up; the only document is the delivery note at fulfilment); cheque/cod add their fee and fulfil (invoice + keys where due); bacs issues a proforma (awaits transfer); stripe charges the saved card or returns a payment link in payment.paymentUrl. Pass cardId (pm_...) to pick a specific card for stripe.",
       inputSchema: {
         orderId: z.number().int().positive(),
         newMethod: z.enum(["bacs", "cheque", "cod", "wallet", "stripe"]),
