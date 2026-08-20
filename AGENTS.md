@@ -112,6 +112,33 @@ group as a whole - today the variants of a family do not look different.
 - An older shop deployment that does not send the field yet degrades to
   "no images"; the CLI never fails on it.
 
+## Product copy (bullets, short and long description)
+
+Every product AND every variant entry carries three text fields:
+`shortDescriptionBullets` (the bullet list the shop prints next to the
+picture, e.g. "Azonnali online aktiválás 1 PC-re"), `shortDescription` (the
+text under the bullets) and `description` (the long description).
+`shortDescriptionBullets` is ALWAYS an array, empty when the row has none,
+never null; the other two are a string or null, never an empty string.
+
+All three are PLAIN TEXT, not HTML, and the line breaks carry meaning: an empty
+line starts a paragraph and a line beginning with -, * or • is a bullet point.
+Render them by line, do not embed them as HTML.
+
+A VARIANT WITH NO COPY OF ITS OWN INHERITS ITS GROUP'S, FIELD BY FIELD. Where
+the variant has its own value you get that one and the group's text is NOT
+appended to it; where it has none the group's value is served unchanged; each of
+the three fields is decided separately. Inheritance never runs the other way, and
+a variant is recognisable by its `groupProductId`. So the copy on a variant may
+describe the whole family - in the shop a variant has no page of its own, so the
+buyer reads the family's text as well.
+
+- `keypro products get <sku|id>` prints the bullets and the description under
+  the key-value block; `--json` (and that of `products search`) carries all
+  three fields verbatim.
+- An older shop deployment that does not send the fields yet degrades to "no
+  copy"; the CLI never fails on it.
+
 ## Queries
 
 - `keypro products search <query>` / `keypro products get <sku|id>` /
@@ -209,8 +236,10 @@ agent that cannot install npm packages can call it directly.
 - Ordering is the same two-step flow as in the CLI:
   `POST /orders/preview` -> `confirmToken` (15 min) -> `POST /orders`,
   optionally with an `Idempotency-Key` header.
-- `images` behaves exactly as described above on every product and variant
-  object of `GET /products` and `GET /products/{key}`.
+- `images` and the three copy fields (`shortDescriptionBullets`,
+  `shortDescription`, `description`) behave exactly as described above on
+  every product and variant object of `GET /products` and
+  `GET /products/{key}`.
 
 ## Reseller licence transfer documents
 

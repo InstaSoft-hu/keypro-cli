@@ -376,6 +376,53 @@ A szerződés pontjai:
 
 ---
 
+## Termékszöveg - a `description` és a `shortDescriptionBullets` szerződés
+
+Ugyanaz az alak minden felületen (terméklista sorai, a lista `variants[]`
+elemei, a termék-részletező, annak `variants[]` elemei):
+
+```json
+"shortDescriptionBullets": [
+  "Újratelepíthető, örökös ESD termékkulcs",
+  "Azonnali online aktiválás 1 PC-re"
+],
+"shortDescription": "A termékkulcsot e-mailben küldjük.",
+"description": "Hosszabb, több bekezdéses leírás a termékről."
+```
+
+A szerződés pontjai:
+
+1. A `shortDescriptionBullets` **mindig tömb, soha nem `null`**. Felsorolás
+   nélküli terméken üres tömb (`[]`) - ugyanaz a szabály, mint az `images`-nél.
+   Üres vagy csak szóközből álló pont nem kerül bele.
+2. A `shortDescription` és a `description` `string` vagy `null`. **Üres string
+   sosem jön**: a csak szóközből álló érték is `null`, tehát egyetlen "nincs
+   szöveg" alakot kell kezelned.
+3. Mindhárom mező **sima szöveg, nem HTML**, és a sortörései jelentősek: üres
+   sor bekezdést vált, a `-`, `*` vagy `•` kezdetű sor felsorolás-pont, az
+   URL-ek nyers szövegként állnak benne. A bolt maga is így jeleníti meg. Ne
+   HTML-ként ágyazd be, hanem sortörés mentén formázd.
+4. A boltban a `shortDescriptionBullets` a kép mellett, adatsorként áll, alatta
+   a `shortDescription`, a `description` pedig a termékoldal alsó, hosszú
+   blokkja. Ez a szövegek szánt helye, nem kötelező, de ebből lesz ugyanaz a
+   termékoldal, mint nálunk.
+5. **A változat (variant) örökli a csoportja szövegét, ha nincs sajátja, és a
+   döntés MEZŐNKÉNT történik.** Amelyik mezőben a változatnak van saját értéke,
+   ott azt (és CSAK azt) kapod: a csoport szövege nem fűződik mögé. Amelyikben
+   nincs, ott a CSOPORT értéke jön, változatlanul. A többi mező ettől
+   függetlenül dől el, tehát egy saját felsorolással rendelkező változat
+   ugyanúgy megkapja a család hosszú leírását - különben pont attól maradna
+   leírás nélkül, hogy valaki beírt hozzá három felsorolás-pontot.
+   Visszafelé nincs öröklés: a csoport sosem veszi át egy változata szövegét.
+   **Ezért egy változaton kapott szöveg a családról is szólhat** - a boltban a
+   változatnak nincs saját oldala (a slugja a csoportéra irányít), tehát a vevő
+   is a család szövegét olvassa. Ha a saját értékre van szükséged, a
+   `GET /products/{key}` `groupProductId` mezőjéből tudod, hogy változat-sort
+   nézel. A termék-részletező `group` hivatkozás-objektuma továbbra sem hoz
+   szöveget: a szövegnek egy helye van a válaszban, a soré magáé.
+
+---
+
 ## Végpontok
 
 ### `GET /api/v1`
@@ -453,7 +500,9 @@ nagybetűtől függetlenül -, `category` (kategória-slug, az alkategóriákkal
 `data`: `total`, `limit`, `offset`, `products[]`. Egy termék:
 
 `id`, `slug`, `sku`, `manufacturerPartNumber`, `name`,
-`type` (`simple` | `variable`), `groupProductId`,
+`type` (`simple` | `variable`),
+`shortDescription`, `shortDescriptionBullets[]`, `description`,
+`groupProductId`,
 `listNetPriceEur`, `netPriceEur`, `priceFromEur`, `priceToEur`, `onSale`,
 `isVirtual`, `isLicensed`, `fulfillmentType`
 (`digital` | `oem_sticker` | `key_card` | `subscription`),
@@ -489,9 +538,11 @@ tehát rendelés ELŐTT megkérdezhető.
 A `variants[]` **mindig jelen van**: `variable` típusú soron a publikált
 változatokkal, minden más soron üres tömbként - `include_variants` nélkül is.
 Elemei: `productId`, `sku`, `manufacturerPartNumber`, `name`, `attributes`,
-`netPriceEur`, `licenseNature`, `images[]`. A jelleg és a gyártói cikkszám a
-változat SAJÁT értéke, és egy családon belül is eltérhet - a csoport-sor nem
-rendelhető, tehát a változaté a mérvadó.
+`netPriceEur`, `licenseNature`, `shortDescription`,
+`shortDescriptionBullets[]`, `description`, `images[]`. A jelleg és a gyártói
+cikkszám a változat SAJÁT értéke, és egy családon belül is eltérhet - a
+csoport-sor nem rendelhető, tehát a változaté a mérvadó. A három szöveg-mező
+viszont saját érték hiányában a CSOPORTÉ (lásd a **Termékszöveg** szakaszt).
 Az `include_variants=true` azt kapcsolja be, hogy a változat-sorok ÖNÁLLÓ
 találatként is megjelenjenek a `products[]` tömbben (különben csak a
 csoport-sor jön).
@@ -531,13 +582,20 @@ szám nem egyedi, tehát nem azonosítana egyetlen sort.
 A `{key}` lehet numerikus termékazonosító, slug vagy cikkszám (ebben a
 sorrendben próbálja).
 
-`data`: a lista mezőin túl `shortDescription`, **`yourUnitNetEur`**,
+`data`: a lista mezőin túl **`yourUnitNetEur`**,
 `yourDiscountPercent`, `notPurchasable`, `variantAttributes`,
 `group: { productId, slug, name } | null`, és a bővebb `variants[]`
 (`productId`, `slug`, `sku`, `manufacturerPartNumber`, `name`, `attributes`,
 `listNetPriceEur`,
 `netPriceEur`, `onSale`, `yourUnitNetEur`, `yourDiscountPercent`,
-`isVirtual`, `fulfillmentType`, `licenseNature`, `stock`, `images[]`).
+`isVirtual`, `fulfillmentType`, `licenseNature`, `stock`, `shortDescription`,
+`shortDescriptionBullets[]`, `description`, `images[]`).
+
+A három szöveg-mező (`shortDescription`, `shortDescriptionBullets`,
+`description`) itt ugyanaz, mint a listán, a termék gyökerén ÉS minden
+változat-soron - a szabály a **Termékszöveg** szakaszban áll. Ha a `{key}` maga
+egy változatot nevezett meg, a gyökéren is ugyanaz az öröklés fut, mint a
+`variants[]` elemein.
 
 **A lista három mezője viszont HIÁNYZIK innen** - ez nem a lista bővebb
 változata, hanem egy másik alak: nincs `category`, nincs `priceFromEur` és

@@ -21,6 +21,49 @@ Frissítés: `npm i -g @keypro/cli`. A telepített verzió: `keypro --version`.
 
 ---
 
+## 0.1.14 - 2026-08-21
+
+### A termék leírása és felsorolás-pontjai a termék-végpontokon
+
+A `GET /products` és a `GET /products/{key}` válasza két új mezőt visz, a
+termék-soron ÉS minden `variants[]` elemen:
+
+- `shortDescriptionBullets`: a rövid leírás felsorolás-pontjai, amiket a bolt a
+  kép mellett, adatsorként mutat (például "Újratelepíthető, örökös ESD
+  termékkulcs", "Azonnali online aktiválás 1 PC-re"). **Mindig tömb, sosem
+  `null`**: adat nélkül üres tömb, ugyanaz a szerződés, mint az `images`-nél.
+- `description`: a hosszú termékleírás. `string` vagy `null`, üres string sosem.
+
+A `shortDescription` eddig CSAK a `GET /products/{key}` termék-gyökerén jött;
+mostantól a listán és minden változat-soron is ott van, tehát a három
+szöveg-mező egy blokkban, ugyanazokon a helyeken érhető el.
+
+Erre való: a partner-webshop termékoldala eddig csak a nevet, az árat és a képet
+tudta kitölteni a mi adatunkból, a leírást viszont nem - a 107 publikált
+termék-sorból 106-nak van hosszú leírása és 99-nek felsorolása, de egyiket sem
+adta ki az API.
+
+**A változat a csoportja szövegét kapja, ha nincs sajátja - mezőnként.** Amelyik
+mezőben a változatnak van saját értéke, ott azt kapod, és a csoport szövege nem
+fűződik mögé; amelyikben nincs, ott a csoporté jön. Visszafelé nincs öröklés. Ez
+ugyanaz a szabály, mint a képeknél, és azért van, mert a boltban a változatnak
+nincs saját oldala: a vevő is a család szövegét olvassa, a partner viszont épp a
+változat-sort rendeli meg (a csoport-sor `notPurchasable`). A pontos
+megfogalmazás az `API.md` **Termékszöveg** szakaszában áll.
+
+Parancssorból: a `keypro products get <cikkszám|id>` a kulcs-érték blokk alatt
+kiírja a felsorolás-pontokat és a leírást; gépi feldolgozásra a `--json` viszi
+mindhárom mezőt.
+
+**Nem törő.** Csak új mezők jelentek meg, meglévő mező nem tűnt el, nem
+változott a neve és nem változott a jelentése sem. A `shortDescription` a
+`GET /products/{key}` termék-gyökerén továbbra is ugyanaz a mező; annyi
+változott, hogy VÁLTOZAT-soron lekérdezve (`{key}` = a változat azonosítója,
+slugja vagy cikkszáma) saját érték hiányában a család szövegét adja `null`
+helyett.
+
+---
+
 ## 0.1.13 - 2026-08-20
 
 ### A gyártói cikkszám is kereshető

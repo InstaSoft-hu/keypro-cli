@@ -22,6 +22,7 @@ import { configPath, readConfig, resolveConfig, writeConfig } from "./config.js"
 import { AGENT_DOCS } from "./agent-docs.js";
 import { featuredImage, imageUrlLines, parseProductImages } from "./images.js";
 import { parseItemSpec } from "./items.js";
+import { parseProductText, productTextBlock } from "./product-text.js";
 import {
   eurFmt,
   fail,
@@ -381,6 +382,7 @@ products
         // `keypro products images` (soronkent egy URL) vagy a --json valo.
         const images = parseProductImages(p);
         const featured = featuredImage(images);
+        const text = parseProductText(p);
         printKV([
           ["Termék", `${p.name} (#${p.id})`],
           ["SKU", p.sku as string | null],
@@ -409,6 +411,15 @@ products
           process.stdout.write(
             `\nAz összes kép URL-je: keypro products images ${p.id}\n`,
           );
+        }
+        // A SZOVEG a kulcs-ertek blokk ALATT, sajat blokkban: a felsorolas-pont
+        // es a hosszu leiras tobb soros, egy igazitott `kulcs  ertek` sorba
+        // olvashatatlanul torne szet. Csonkitas nincs - a leiras EZ, es aki
+        // gepileg dolgozza fel, a `--json`-t hasznalja. Szoveg nelkuli termeken
+        // az egesz blokk elmarad (nem ures cim).
+        const textBlock = productTextBlock(text);
+        if (textBlock !== "") {
+          process.stdout.write(`\nLeírás\n${textBlock}`);
         }
       });
     } catch (err) {
