@@ -331,7 +331,7 @@ const products = program.command("products").description("termek-katalogus");
 
 products
   .command("search [query]")
-  .description("termekkereses nev vagy cikkszam alapjan")
+  .description("termekkereses nev, cikkszam vagy gyartoi cikkszam alapjan")
   .option("--category <slug>", "kategoria-szures (alkategoriakkal egyutt)")
   .option("--on-sale", "csak akcios termekek", false)
   .option("--sort <mod>", "rendezes: popularity|name|price_asc|price_desc|newest")

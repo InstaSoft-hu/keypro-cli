@@ -21,6 +21,38 @@ Frissítés: `npm i -g @keypro/cli`. A telepített verzió: `keypro --version`.
 
 ---
 
+## 0.1.13 - 2026-08-20
+
+### A gyártói cikkszám is kereshető
+
+A `GET /products` `q` paramétere mostantól **három mezőre illeszt**: a termék
+nevére, a cikkszámra (`sku`) és a **gyártói cikkszámra**
+(`manufacturerPartNumber`). Mindhárom ugyanúgy: részlet-egyezéssel és kis- és
+nagybetűtől függetlenül, tehát a `dg7gmgf0pn5d` ugyanazt találja meg, mint a
+`DG7GMGF0PN5D`, és a szám töredéke is elég.
+
+Erre való: a gyártói vagy beszállítói árlistádból kimásolt azonosítóval egy
+hívásból megkérdezhető, hogy **visszük-e azt a cikket**. Eddig a mező a
+válaszban benne volt (0.1.12), de keresni nem lehetett rá, tehát ehhez a teljes
+katalógust végig kellett lapoznod.
+
+**Rendelni továbbra sem lehet a gyártói számmal**, mert nem egyedi: ugyanaz a
+szám több változaton is szerepelhet. A találatból a `productId`-t vagy a `sku`-t
+használd a `POST /orders(/preview)` `items[]` mezőjében. Ugyanezért a
+`GET /products/{key}` **sem** old fel gyártói cikkszámot: a `{key}` továbbra is
+azonosító, slug vagy `sku`.
+
+Parancssorból: a `keypro products search <kifejezés>` ugyanezt a `q`-t küldi,
+tehát a gyártói cikkszám ott is működik.
+
+**Nem törő.** A `q` a névre és a cikkszámra pontosan ugyanúgy illeszt, mint
+eddig; a változás csak annyi, hogy egy eddig nem keresett mező is találhat.
+Aki a `q`-t cikkszám-kereséshez használja, **több** találatot kaphat, mint
+korábban - ha pontos cikkszámra van szükséged, a `sku` mezőt hasonlítsd a
+találatokon.
+
+---
+
 ## 0.1.12 - 2026-08-20
 
 ### Gyártói cikkszám a termék-végpontokon

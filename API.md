@@ -443,7 +443,9 @@ Ha egyetlen ismert mezőt sem küldtél: `validation_failed`.
 
 ### `GET /api/v1/products` - scope: `read`
 
-Query: `q` (max 200), `category` (kategória-slug, az alkategóriákkal együtt),
+Query: `q` (max 200) - **névre, cikkszámra (`sku`) ÉS gyártói cikkszámra
+(`manufacturerPartNumber`) illeszt**, mindhárom mezőn részlet-egyezéssel, kis- és
+nagybetűtől függetlenül -, `category` (kategória-slug, az alkategóriákkal együtt),
 `on_sale` (`true`/`false`), `sort`
 (`popularity` | `name` | `price_asc` | `price_desc` | `newest`),
 `include_variants` (`true`/`false`), `limit` (alap 50), `offset`.
@@ -516,6 +518,13 @@ tagjai gyakran egyetlen gyártói cikket fednek), használt licencnél pedig
 sokszor nem is a gyártó mai cikke. **Rendelni nem lehet vele**: a
 `POST /orders(/preview)` `items[]` mezője továbbra is `sku`-t vagy `productId`-t
 vár. A mező **hiányozhat** (`null`): a katalógus nagy részének nincs.
+
+**Keresni viszont lehet rá:** a `q` a gyártói cikkszámra ugyanúgy illeszt, mint
+a névre és a cikkszámra, tehát az árlistádból kimásolt gyártói szám egy hívásból
+megválaszolja, hogy visszük-e a terméket. A találatból a `productId` vagy a
+`sku` az, amivel utána rendelni tudsz. A `GET /products/{key}` **nem** old fel
+gyártói cikkszámot: a `{key}` továbbra is azonosító, slug vagy `sku` - a gyártói
+szám nem egyedi, tehát nem azonosítana egyetlen sort.
 
 ### `GET /api/v1/products/{key}` - scope: `read`
 
