@@ -21,6 +21,34 @@ Frissítés: `npm i -g @keypro/cli`. A telepített verzió: `keypro --version`.
 
 ---
 
+## 0.1.12 - 2026-08-20
+
+### Gyártói cikkszám a termék-végpontokon
+
+A `GET /products` és a `GET /products/{key}` válasza új mezőt visz:
+`manufacturerPartNumber`. Ez a **gyártó saját azonosítója** a termékre (MPN), a
+Microsoftnál például `DG7GMGF0PN5D`. Erre való: a katalógusunkat a gyártói vagy
+beszállítói árlistáddal ezen az azonosítón tudod összevetni.
+
+Ott van a termék-soron és **minden változat-soron** is (a lista `variants[]`
+elemein, a részletező bővebb `variants[]` elemein, és `include_variants=true`
+mellett az önálló változat-találatokon). A mező **hiányozhat** (`null`): a
+katalógus nagy részének nincs gyártói cikkszáma.
+
+**Külön mező a `sku`-tól, és nem is helyettesíti.** A `sku` a MI azonosítónk:
+ezen old fel a rendelés, ezért a katalógusban egyedi. A gyártói szám a GYÁRTÓÉ,
+tehát **nem egyedi** - ugyanaz a szám több változaton is szerepelhet -, és
+**rendelni nem lehet vele**: a `POST /orders(/preview)` `items[]` mezője
+továbbra is `sku`-t vagy `productId`-t vár.
+
+Parancssorból: a `keypro products get <cikkszám vagy azonosító>` új "Gyártói
+cikkszám" sorban mutatja (kitöltetlen mezőnél a sor kimarad), a `--json` pedig a
+nyers értéket viszi tovább.
+
+**Nem törő.** Új mező, a meglévők változatlanok.
+
+---
+
 ## 0.1.11 - 2026-08-20
 
 ### A licenc jellege olvasható a termék-végpontokon

@@ -384,6 +384,10 @@ products
         printKV([
           ["Termék", `${p.name} (#${p.id})`],
           ["SKU", p.sku as string | null],
+          // A GYARTOI CIKKSZAM kozvetlenul a mienk ALATT: a ket azonosito
+          // viszonya igy latszik. A `printKV` a `null`-t kihagyja, tehat a
+          // katalogus nagy reszen (ahol nincs) nem marad ures sor.
+          ["Gyártói cikkszám", p.manufacturerPartNumber as string | null],
           ["Lista nettó ár", `${Number(p.listNetPriceEur).toFixed(2)} EUR`],
           ["Akciós", p.onSale ? "igen" : "nem"],
           ["A te nettó egységárad", `${Number(p.yourUnitNetEur).toFixed(2)} EUR`],

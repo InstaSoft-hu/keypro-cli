@@ -450,7 +450,8 @@ Query: `q` (max 200), `category` (kategória-slug, az alkategóriákkal együtt)
 
 `data`: `total`, `limit`, `offset`, `products[]`. Egy termék:
 
-`id`, `slug`, `sku`, `name`, `type` (`simple` | `variable`), `groupProductId`,
+`id`, `slug`, `sku`, `manufacturerPartNumber`, `name`,
+`type` (`simple` | `variable`), `groupProductId`,
 `listNetPriceEur`, `netPriceEur`, `priceFromEur`, `priceToEur`, `onSale`,
 `isVirtual`, `isLicensed`, `fulfillmentType`
 (`digital` | `oem_sticker` | `key_card` | `subscription`),
@@ -485,9 +486,10 @@ tehát rendelés ELŐTT megkérdezhető.
 
 A `variants[]` **mindig jelen van**: `variable` típusú soron a publikált
 változatokkal, minden más soron üres tömbként - `include_variants` nélkül is.
-Elemei: `productId`, `sku`, `name`, `attributes`, `netPriceEur`,
-`licenseNature`, `images[]`. A jelleg a változat SAJÁT értéke, és egy családon
-belül is eltérhet - a csoport-sor nem rendelhető, tehát a változaté a mérvadó.
+Elemei: `productId`, `sku`, `manufacturerPartNumber`, `name`, `attributes`,
+`netPriceEur`, `licenseNature`, `images[]`. A jelleg és a gyártói cikkszám a
+változat SAJÁT értéke, és egy családon belül is eltérhet - a csoport-sor nem
+rendelhető, tehát a változaté a mérvadó.
 Az `include_variants=true` azt kapcsolja be, hogy a változat-sorok ÖNÁLLÓ
 találatként is megjelenjenek a `products[]` tömbben (különben csak a
 csoport-sor jön).
@@ -502,6 +504,19 @@ nem fordulhat elő.
 A `sku` viszont **hiányozhat**: a katalógus több mint felének nincs cikkszáma,
 ilyenkor a mező `null`. Ezeket a termékeket `productId`-vel kell rendelni.
 
+**A `manufacturerPartNumber` a GYÁRTÓI cikkszám** (MPN): a gyártó saját
+azonosítója a termékre, a Microsoftnál például `DG7GMGF0PN5D`. Erre való: a
+katalógusunkat a gyártói vagy beszállítói árlistáddal ezen az azonosítón tudod
+összevetni.
+
+**Külön mező a `sku`-tól, és nem is helyettesíti.** A `sku` a MI azonosítónk:
+ezen old fel a rendelés, ezért egyedi. A gyártói szám a GYÁRTÓÉ, tehát
+**nem egyedi**: ugyanaz a szám több változaton is szerepelhet (egy termékcsalád
+tagjai gyakran egyetlen gyártói cikket fednek), használt licencnél pedig
+sokszor nem is a gyártó mai cikke. **Rendelni nem lehet vele**: a
+`POST /orders(/preview)` `items[]` mezője továbbra is `sku`-t vagy `productId`-t
+vár. A mező **hiányozhat** (`null`): a katalógus nagy részének nincs.
+
 ### `GET /api/v1/products/{key}` - scope: `read`
 
 A `{key}` lehet numerikus termékazonosító, slug vagy cikkszám (ebben a
@@ -510,7 +525,8 @@ sorrendben próbálja).
 `data`: a lista mezőin túl `shortDescription`, **`yourUnitNetEur`**,
 `yourDiscountPercent`, `notPurchasable`, `variantAttributes`,
 `group: { productId, slug, name } | null`, és a bővebb `variants[]`
-(`productId`, `slug`, `sku`, `name`, `attributes`, `listNetPriceEur`,
+(`productId`, `slug`, `sku`, `manufacturerPartNumber`, `name`, `attributes`,
+`listNetPriceEur`,
 `netPriceEur`, `onSale`, `yourUnitNetEur`, `yourDiscountPercent`,
 `isVirtual`, `fulfillmentType`, `licenseNature`, `stock`, `images[]`).
 
