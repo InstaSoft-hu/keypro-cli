@@ -11,8 +11,11 @@ import { randomUUID } from "node:crypto";
 import { Command } from "commander";
 import {
   createClient,
+  licenseNatureLabel,
+  LICENSE_DOCUMENT_KINDS,
   type AddressInput,
   type KeyproClient,
+  type LicenseDocumentKind,
   type OrderRequestInput,
 } from "./client.js";
 import { configPath, readConfig, resolveConfig, writeConfig } from "./config.js";
@@ -391,6 +394,10 @@ products
               : null,
           ],
           ["Szállítást igényel", p.isVirtual ? "nem (digitális)" : "igen (fizikai)"],
+          // MIT VESZEL JOGILAG - kulon sor a szallitas/kezbesites mellett, mert
+          // ebbol kovetkezik, milyen vegfelhasznaloi iratot allithatsz ki a
+          // termekrol (`keypro licdok`). Csoport-soron a valtozate a mervado.
+          ["Licenc jellege", licenseNatureLabel(p.licenseNature)],
           ["Képek", images.length > 0 ? `${images.length} db` : "nincs"],
           ["Fő kép", featured ? featured.url : null],
         ]);
@@ -457,7 +464,7 @@ function addOrderOptions(cmd: Command): Command {
     )
     .option(
       "--payment <mod>",
-      "fizetesi mod: bacs|cheque|cod|wallet|card",
+      "fizetesi mod: bacs|cheque|cod|wallet|card|internal",
     )
     .option("--shipping <mod>", "szallitasi mod: gls_hd|gls_parcelshop|combine_free")
     .option("--parcelshop <id>", "GLS atveteli pont azonosito (gls_parcelshop eseten)")
@@ -499,10 +506,15 @@ function buildOrderRequest(opts: Record<string, unknown>): OrderRequestInput {
     wallet: "wallet",
     card: "stripe",
     stripe: "stripe",
+    // Belso elszamolas: csak a cegen beluli partner-fiok valaszthatja, minden
+    // mas fiok 403 `payment_method_not_allowed` valaszt kap a szervertol. A
+    // CLI SZANDEKOSAN elfogadja: a hibauzenet igy a szervertol jon, beszelve,
+    // nem egy helyi "ismeretlen fizetesi mod" mondat.
+    internal: "internal",
   };
   const paymentMethod = methodMap[payment];
   if (!paymentMethod) {
-    usageError("Adj meg fizetési módot: --payment bacs|cheque|cod|wallet|card");
+    usageError("Adj meg fizetési módot: --payment bacs|cheque|cod|wallet|card|internal");
   }
 
   let items;
@@ -1018,18 +1030,31 @@ licdocCmd
 
 licdocCmd
   .command("pdf <id>")
-  .description("a dokumentum PDF-je fajlba (atruhazas | megsemmisites)")
-  .option("--kind <fajta>", "atruhazas vagy megsemmisites", "atruhazas")
+  .description(
+    `a dokumentum PDF-je fajlba (${LICENSE_DOCUMENT_KINDS.join(" | ")})`,
+  )
+  .option(
+    "--kind <fajta>",
+    // A dokumentumhoz TENYLEGESEN tartozo fajtakat a `licdok get <id>` valasza
+    // hirdeti a `pdf` mezo kulcsain; ami nem szerepel ott, arra a szerver 404-et
+    // ad (a licenc-jelleg kapuja).
+    `a fajta: ${LICENSE_DOCUMENT_KINDS.join(", ")}`,
+    "atruhazas",
+  )
   .option("--out <fajl>", "cel fajlnev (alap: a szervertol kapott nev)")
   .action(
     async (id: string, opts: { kind: string; out?: string }, cmd: Command) => {
-      if (opts.kind !== "atruhazas" && opts.kind !== "megsemmisites") {
-        usageError("A --kind erteke atruhazas vagy megsemmisites lehet.");
+      if (
+        !(LICENSE_DOCUMENT_KINDS as readonly string[]).includes(opts.kind)
+      ) {
+        usageError(
+          `A --kind erteke ezek egyike lehet: ${LICENSE_DOCUMENT_KINDS.join(", ")}.`,
+        );
       }
       try {
         const { bytes, filename } = await clientFor(cmd).licenseDocumentPdf(
           Number(id),
-          opts.kind,
+          opts.kind as LicenseDocumentKind,
         );
         // A `--out` a FELHASZNALO utvonala, azt nem korlatozzuk. A `filename`
         // viszont a szervertol jon, es a `client.ts` mar tisztitva adja

@@ -224,7 +224,7 @@ mindenhol máshol. A gyakorlati szabály: ha a válasz `Content-Type`-ja
 | `validation_failed` | 400 | séma-hiba; `details` = `[{ path, message }]`, vagy hiányzó törzsadat esetén `details.missing` |
 | `not_found` | 404 | nincs ilyen rendelés / számla / kulcs, vagy ismeretlen végpont |
 | `unknown_product` | 400 / 404 | ismeretlen SKU vagy termékazonosító; `details.unknownSkus` / `details.unknownProductIds` |
-| `ambiguous_sku` | 400 | a SKU több termékre illik; `details.ambiguousSkus` - adj `productId`-t |
+| `ambiguous_sku` | 400 | a SKU több termékre illik; `details.ambiguousSkus` - adj `productId`-t. **Ma már nem fordulhat elő**: a cikkszám adatbázis-szinten egyedi (lásd a `GET /api/v1/products` szakaszt). A kód a szerződés része marad, a feloldó ellenőrzése is - a kliensnek nincs teendője |
 | `variant_required` | 400 | csoport-terméket próbáltál rendelni; `details.variants` felsorolja a választható változatokat |
 | `coupon_invalid` | 400 | a kuponkód nem érvényes erre a kosárra |
 | `shipping_required` | 400 | fizikai tétel szállítási mód nélkül; `details.availableMethods` |
@@ -236,6 +236,7 @@ mindenhol máshol. A gyakorlati szabály: ha a válasz `Content-Type`-ja
 | `insufficient_wallet_balance` | 400 | kevés a KEP egyenleg; `details.balanceEurNet`, `details.requiredNetEur` |
 | `wallet_payment_disabled` | 400 | a KEP egyenleggel fizetés ki van kapcsolva |
 | `topup_method_not_allowed` | 400 | egyenlegfeltöltő rendelésre ez a fizetési mód nem megengedett |
+| `payment_method_not_allowed` | 403 | ez a fizetési mód a te fiókodból nem választható (ma: `internal`, a belső elszámolás) |
 | `same_payment_method` | 400 | a rendelés már ezen a fizetési módon van |
 | `invalid_card` | 400 | a megadott `cardId` nem a te mentett kártyád |
 | `stripe_unavailable` | 502 | a kártyás fizetés szolgáltatója nem elérhető |
@@ -453,21 +454,53 @@ Query: `q` (max 200), `category` (kategória-slug, az alkategóriákkal együtt)
 `listNetPriceEur`, `netPriceEur`, `priceFromEur`, `priceToEur`, `onSale`,
 `isVirtual`, `isLicensed`, `fulfillmentType`
 (`digital` | `oem_sticker` | `key_card` | `subscription`),
-`stock: { status, available, label }`
-(`status`: `always` | `unknown` | `unlimited` | `in_stock` | `low` | `out`),
+`licenseNature` (`used` | `new` | `subscription`),
+`stock: { status, available, label }` (`status`: `always` | `unknown` |
+`unlimited` | `in_stock` | `low` | `out` | `on_demand`),
 `variantCount`, `variants[]`, `category: { slug, name } | null`, `images[]`.
+
+A `stock.status` `on_demand` értéke azt jelenti, hogy a terméket **rendelésre
+szerezzük be** (előfizetés), és nincs belőle szabad licenc: az `available` ezért
+0, a `label` pedig `Max 24 óra`. A `out` ugyanígy 0 szabad licencet jelent, de
+olyan terméken, amit készleten tartunk - ott a beszerzési idő nyitott. Egyik sem
+blokkolja a rendelést.
 
 **Az itteni `netPriceEur` / `listNetPriceEur` a KATALÓGUS-ár, a te
 szerződéses kedvezményed nélkül** (lásd a "Pénznem, árak, kerekítés"
 szakaszt). A te egységárad a `GET /products/{key}` `yourUnitNetEur` mezőjén,
 a kötelező érvényű összeg pedig a `POST /orders/preview` válaszán jön.
 
+**A `licenseNature` azt mondja meg, MIT VESZEL JOGILAG** (`used` = használt,
+határozatlan idejű licenc a másodlagos forgalomból, `new` = korábban nem
+aktivált licenc a gyártó hivatalos láncából, `subscription` = határozott idejű,
+a jogosulthoz kötött előfizetés). **Külön a `fulfillmentType`-tól**, ami csak
+azt mondja meg, MIT KAPSZ (kulcs, matrica, kártya, előfizetés): egy `digital`
+termék lehet használt és új is. A mező mindig ki van töltve, sosem `null`.
+
+Ebből következik, **milyen végfelhasználói iratot állíthatsz ki a termékről** a
+licenc-dokumentumokkal - a jelleg-fajta táblázat egy helyen áll, lásd
+**`licenseNature`: melyik IRAT készül a dokumentumból**. A dokumentum ugyanezt a
+nevű mezőt viszi, ott a kiállítás pillanatképeként; itt a termék MAI értéke,
+tehát rendelés ELŐTT megkérdezhető.
+
 A `variants[]` **mindig jelen van**: `variable` típusú soron a publikált
 változatokkal, minden más soron üres tömbként - `include_variants` nélkül is.
-Elemei: `productId`, `sku`, `name`, `attributes`, `netPriceEur`, `images[]`.
+Elemei: `productId`, `sku`, `name`, `attributes`, `netPriceEur`,
+`licenseNature`, `images[]`. A jelleg a változat SAJÁT értéke, és egy családon
+belül is eltérhet - a csoport-sor nem rendelhető, tehát a változaté a mérvadó.
 Az `include_variants=true` azt kapcsolja be, hogy a változat-sorok ÖNÁLLÓ
 találatként is megjelenjenek a `products[]` tömbben (különben csak a
 csoport-sor jön).
+
+**A `sku` a katalógusban EGYEDI**, kis- és nagybetűre érzéketlenül is:
+`OFFICE2024` és `office2024` nem élhet meg egymás mellett. Adatbázis-szintű
+részleges egyedi index őrzi, tehát egy cikkszám **legfeljebb egy** terméksort -
+egyszerű terméket vagy változatot - azonosít. Ezért a `POST /orders/preview` és
+a `POST /orders` `items[].sku` mezője egyértelmű, és az `ambiguous_sku` hiba
+nem fordulhat elő.
+
+A `sku` viszont **hiányozhat**: a katalógus több mint felének nincs cikkszáma,
+ilyenkor a mező `null`. Ezeket a termékeket `productId`-vel kell rendelni.
 
 ### `GET /api/v1/products/{key}` - scope: `read`
 
@@ -479,7 +512,7 @@ sorrendben próbálja).
 `group: { productId, slug, name } | null`, és a bővebb `variants[]`
 (`productId`, `slug`, `sku`, `name`, `attributes`, `listNetPriceEur`,
 `netPriceEur`, `onSale`, `yourUnitNetEur`, `yourDiscountPercent`,
-`isVirtual`, `fulfillmentType`, `stock`, `images[]`).
+`isVirtual`, `fulfillmentType`, `licenseNature`, `stock`, `images[]`).
 
 **A lista három mezője viszont HIÁNYZIK innen** - ez nem a lista bővebb
 változata, hanem egy másik alak: nincs `category`, nincs `priceFromEur` és
@@ -504,7 +537,8 @@ Hiba: `unknown_product` (404).
 `confirmToken`-t.
 
 Törzs: `items[]` (1-50 elem, elemenként `sku` **vagy** `productId`, plusz
-`qty`), `paymentMethod` (`bacs` | `cheque` | `cod` | `wallet` | `stripe`),
+`qty`), `paymentMethod` (`bacs` | `cheque` | `cod` | `wallet` | `stripe` |
+`internal`),
 `shippingMethodId` (`gls_hd` | `gls_parcelshop` | `combine_free`),
 `parcelshopId`, `combineWithOrderId`, `couponCode`, `currency`
 (`EUR` | `HUF`, alap `EUR`), `billing`, `shipping`, `taxNumber`,
@@ -560,6 +594,7 @@ Fizetési módok:
 | `cod` | utánvét, csak fizikai kiszállításnál (+1,5 EUR) |
 | `wallet` | KEP egyenleg, azonnal terhelődik; ilyen rendelésről számla NEM készül, csak szállítólevél (az egyenleget a feltöltéskor számláztuk) |
 | `stripe` | mentett bankkártya (off-session) |
+| `internal` | belső elszámolás: **csak a cégen belüli partner-fiókból** választható, minden más fiók `payment_method_not_allowed` (403) hibát kap már az előnézeten is. Nincs fizetés, a rendelés azonnal feldolgozás alá kerül, és **semmilyen bizonylat nem készül róla** - számla, díjbekérő és szállítólevél sem |
 
 ### `GET /api/v1/orders` - scope: `read`
 
@@ -740,6 +775,36 @@ A két halmaz akkor egyezik meg, ha a listát `?orderId=X&status=all` alakban
 kéred - a lapozást (`limit`, `offset`) figyelembe véve, mert a
 rendelés-részletező nem lapoz.
 
+#### `licenseNature`: melyik IRAT készül a dokumentumból
+
+A dokumentumnak van egy `licenseNature` mezője (`used` | `new` |
+`subscription`), és **ebből következik, milyen PDF tölthető le róla**. Az érték
+a TERMÉK tulajdonsága (`products.license_nature`), a dokumentumon pedig a
+kiállítás pillanatának PILLANATKÉPE: egy későbbi katalógus-javítás nem írja át
+egy már kiadott irat fajtáját. Ugyanez a mező a `GET /products` és a
+`GET /products/{key}` válaszán is ott van (a változat-sorokon is), tehát a
+jelleget **rendelés előtt** meg tudod kérdezni, nem csak a kiállított iratról.
+
+| `licenseNature` | Mit jelent | Letölthető irat (`?kind=`) |
+| --- | --- | --- |
+| `used` | Használt, határozatlan idejű licenc másodlagos forgalomból | `atruhazas`, `megsemmisites` |
+| `new` | Új, korábban nem aktivált licenc a gyártó hivatalos láncából | `licencigazolas` |
+| `subscription` | Határozott idejű, a jogosulthoz kötött előfizetés | `elofizetes-igazolas` |
+
+**A fajtát nem te választod.** A `POST` kérésben nincs ilyen mező: a jelleg a
+kiállított tételek termékéből dől el, és a válasz `pdf` objektumának KULCSAI
+pontosan a hozzá tartozó iratokat hirdetik. Ami ott nincs meghirdetve, arra a
+`/pdf` végpont `not_found` (404) hibát ad - egy előfizetésre kiállított
+dokumentumról tehát nem tölthető le átruházási igazolás.
+
+**Egy dokumentumon csak AZONOS jellegű tételek lehetnek.** Vegyes kérés
+`item_not_allowed` (400) hibát kap, és a hibaüzenet MEGNEVEZI a terméket meg a
+jellegét, hogy tudd, melyik sort kell külön dokumentumba tenni.
+
+Miért így: 2026-08-19-ig egyetlen NÉVMINTA döntötte el, mi számít használt
+licencnek, ezért előfizetésre is használt-licenc átruházási igazolás készült -
+olyan szolgáltatásra, amit átruházni nem lehet.
+
 #### `includeKeys`: mit kapcsol, és mit NEM
 
 Két külön dolog visel hasonló nevet:
@@ -787,7 +852,8 @@ alapértelmezés `live`), `limit`, `offset`.
 
 `data`: `limit`, `offset`, `total`, `documents[]`. Egy sor: `id`,
 `documentNumber`, `orderId` (az elsődleges forrás-rendelés), `status`
-(`live` | `revoked`), `customerName`, `totalQty`, `items[]`
+(`live` | `revoked`), `customerName`, `totalQty`, `licenseNature`
+(`used` | `new` | `subscription`), `items[]`
 (`productId`, `productName`, `qty`), `createdAt`, `revokedAt`.
 
 Az `orderId` szűrő ugyanazt a szabályt használja, mint a `GET /orders/{id}`
@@ -877,7 +943,9 @@ Válasz: HTTP **201** új dokumentumnál, **200** idempotens ismétlésnél.
 
 `data`: `document`, `idempotentReplay`. A `document` **pontosan ugyanaz az
 alak**, amit a `GET /license-documents/{id}` ad (ugyanaz a kód állítja elő) -
-benne a `pdf` mezővel, tehát külön letöltési linket nem kell kérned.
+benne a `licenseNature` és a `pdf` mezővel, tehát külön letöltési linket nem
+kell kérned. A `pdf` KULCSAI a `licenseNature`-től függenek (lásd
+`licenseNature`: melyik IRAT készül a dokumentumból).
 
 Hibák ezen a végponton: `validation_failed` (400), `item_not_allowed` (400),
 `no_transferable_keys` (400), `license_service_unavailable` (503), `lock_busy`
@@ -898,7 +966,11 @@ Egy kiállított dokumentum TELJES pillanatképe.
 (`name`, `taxNumber`, `postcode`, `city`, `addressLine`, `contact` - a
 végfelhasználó adatai a kiállítás pillanatában, hiányzó mező `null`),
 `items[]` a `keys[]` tömbbel (`keyId`, `keyValue`, `qty`, `orderId`,
-`orderNumber`), és `pdf` (`atruhazas`, `megsemmisites` - a két letöltési cím).
+`orderNumber`), és `pdf` - a dokumentumhoz TÉNYLEGESEN tartozó letöltési
+címek. A `pdf` KULCSAI a `licenseNature`-ből következnek (`used`:
+`atruhazas` + `megsemmisites`; `new`: `licencigazolas`; `subscription`:
+`elofizetes-igazolas`), tehát az objektum kulcshalmaza dokumentumonként
+különbözhet - ne égesd be a két régi nevet.
 
 A `keyValue` a **teljes, maszkolatlan termékkulcs**, és itt sosem `null`: a
 tárolt pillanatképből jön, nem a licencszolgáltatásból. Egy későbbi kulcscsere
@@ -944,8 +1016,14 @@ Migrált, régi szállítólevél is visszavonható.
 ### `GET /api/v1/license-documents/{id}/pdf` - scope: `read`
 
 A dokumentum PDF-je. Query: `kind` = `atruhazas` (átruházási igazolás,
-alapértelmezés) vagy `megsemmisites` (megsemmisítési nyilatkozat); bármi más
-`not_found`.
+alapértelmezés), `megsemmisites` (megsemmisítési nyilatkozat),
+`licencigazolas` (új licenc igazolása) vagy `elofizetes-igazolas`.
+
+**Két külön 404 van, és a hívó felé nincs köztük különbség.** Az ismeretlen
+fajta `not_found`, ÉS az is, ha a fajta LÉTEZIK, de nem ehhez a dokumentumhoz
+tartozik (`?kind=atruhazas` egy `subscription` jellegű dokumentumon). A biztos
+út: a `GET /license-documents/{id}` válaszának `pdf` mezőjéből vedd a címet -
+ott pontosan a letölthető iratok szerepelnek.
 
 **Ez az API egyetlen olyan végpontja, amelynek a SIKERES válasza nem JSON
 boríték**: HTTP 200 esetén a törzs nyers `application/pdf`, a fájlnév a

@@ -23,7 +23,7 @@ export type { KeyproClient, KeyproClientOptions } from "./client.js";
  * (korabban a web 0.1.4-en ragadt). Kiadaskor a package.json-nal egyutt ez az
  * egy konstans valtozik.
  */
-export const KEYPRO_MCP_VERSION = "0.1.10";
+export const KEYPRO_MCP_VERSION = "0.1.11";
 
 /**
  * A szerver `instructions` mezoje (MCP initialize). A kliens modellje ezt latja
@@ -93,9 +93,9 @@ const orderRequestShape = {
     .min(1)
     .describe("Order lines"),
   paymentMethod: z
-    .enum(["bacs", "cheque", "cod", "wallet", "stripe"])
+    .enum(["bacs", "cheque", "cod", "wallet", "stripe", "internal"])
     .describe(
-      "bacs=bank transfer (proforma first), cheque=8-day terms (+5%), cod=cash on delivery, wallet=KEP balance (NO invoice for such an order, only a delivery note - the balance is invoiced when it is topped up), stripe=saved card",
+      "bacs=bank transfer (proforma first), cheque=8-day terms (+5%), cod=cash on delivery, wallet=KEP balance (NO invoice for such an order, only a delivery note - the balance is invoiced when it is topped up), stripe=saved card, internal=internal settlement, available ONLY to the in-house partner account (every other account gets payment_method_not_allowed, HTTP 403, already on the preview): no payment is taken and NO document at all is issued for the order - no invoice, no proforma and no delivery note",
     ),
   shippingMethodId: z
     .enum(["gls_hd", "gls_parcelshop", "combine_free"])
@@ -187,7 +187,7 @@ export function registerKeyproTools(server: McpServer, client: KeyproClient): vo
     {
       title: "Search products",
       description:
-        "Search the catalog. Returns id, sku, name and the CATALOG net EUR price (netPriceEur, listNetPriceEur) - that price does NOT carry the caller's contracted discount, so never quote it as the caller's own price: use yourUnitNetEur from keypro_product_get, and the binding total from keypro_order_preview. A product with type='variable' is a GROUP that cannot be ordered directly - order one of the productIds listed in its `variants` array. Pass includeVariants=true to get variant rows in the flat list too. Every product and every variant entry also carries an `images` array of { url, alt, position }: ordered, always present (empty when the product has no picture, never null). The urls are ABSOLUTE and directly fetchable, so you can show or download them without building a link yourself. `images[0]` is the featured image AMONG THE SERVED ONES: a stored image the shop cannot serve is left out of the array (the server logs it), so on such a product the next image becomes `images[0]`. A VARIANT WITH NO OWN IMAGE INHERITS ITS GROUP'S: a variant that has at least one servable image of its own carries only that one, and a variant that has none is served the group's array unchanged (same filtering, same `images[0]` rule). Inheritance never runs the other way, so a picture on a variant may in fact depict the whole group - today the variants do not look different from each other.",
+        "Search the catalog. Returns id, sku, name and the CATALOG net EUR price (netPriceEur, listNetPriceEur) - that price does NOT carry the caller's contracted discount, so never quote it as the caller's own price: use yourUnitNetEur from keypro_product_get, and the binding total from keypro_order_preview. A product with type='variable' is a GROUP that cannot be ordered directly - order one of the productIds listed in its `variants` array. Pass includeVariants=true to get variant rows in the flat list too. Every product and every variant entry carries `licenseNature` ('used' | 'new' | 'subscription'): what the buyer legally gets, and therefore which end-user document may be issued about it. It is SEPARATE from fulfillmentType (what the buyer receives) - a digitally delivered key can be a used licence or a new one - and it is readable here, BEFORE ordering. Every product and every variant entry also carries an `images` array of { url, alt, position }: ordered, always present (empty when the product has no picture, never null). The urls are ABSOLUTE and directly fetchable, so you can show or download them without building a link yourself. `images[0]` is the featured image AMONG THE SERVED ONES: a stored image the shop cannot serve is left out of the array (the server logs it), so on such a product the next image becomes `images[0]`. A VARIANT WITH NO OWN IMAGE INHERITS ITS GROUP'S: a variant that has at least one servable image of its own carries only that one, and a variant that has none is served the group's array unchanged (same filtering, same `images[0]` rule). Inheritance never runs the other way, so a picture on a variant may in fact depict the whole group - today the variants do not look different from each other.",
       inputSchema: {
         q: z.string().optional().describe("Search text (name or SKU)"),
         category: z
@@ -222,7 +222,7 @@ export function registerKeyproTools(server: McpServer, client: KeyproClient): vo
     {
       title: "Product details",
       description:
-        "Product details plus YOUR effective unit price. For a type='variable' group the response has notPurchasable=true and a `variants` array, each entry with its own productId, attributes and yourUnitNetEur - order one of those. The product and every variant entry carries an `images` array of { url, alt, position }: ordered, always present (empty when the product has no picture, never null). The urls are ABSOLUTE and directly fetchable, so you can show or download them without building a link yourself. `images[0]` is the featured image AMONG THE SERVED ONES: a stored image the shop cannot serve is left out of the array (the server logs it), so on such a product the next image becomes `images[0]`. A VARIANT WITH NO OWN IMAGE INHERITS ITS GROUP'S: a variant that has at least one servable image of its own carries only that one, and a variant that has none is served the group's array unchanged (same filtering, same `images[0]` rule). Inheritance never runs the other way, so a picture on a variant may in fact depict the whole group - today the variants do not look different from each other.",
+        "Product details plus YOUR effective unit price. For a type='variable' group the response has notPurchasable=true and a `variants` array, each entry with its own productId, attributes and yourUnitNetEur - order one of those. The product and every variant entry also carries `licenseNature` ('used' | 'new' | 'subscription'): what the buyer legally gets, and therefore which end-user document may be issued about it. It is SEPARATE from fulfillmentType (what the buyer receives), and a variant may differ from its group - the variant is the row that is actually bought. The product and every variant entry carries an `images` array of { url, alt, position }: ordered, always present (empty when the product has no picture, never null). The urls are ABSOLUTE and directly fetchable, so you can show or download them without building a link yourself. `images[0]` is the featured image AMONG THE SERVED ONES: a stored image the shop cannot serve is left out of the array (the server logs it), so on such a product the next image becomes `images[0]`. A VARIANT WITH NO OWN IMAGE INHERITS ITS GROUP'S: a variant that has at least one servable image of its own carries only that one, and a variant that has none is served the group's array unchanged (same filtering, same `images[0]` rule). Inheritance never runs the other way, so a picture on a variant may in fact depict the whole group - today the variants do not look different from each other.",
       inputSchema: { key: z.string().describe("Product id, slug or SKU") },
       annotations: READ_ONLY,
     },
@@ -323,7 +323,7 @@ export function registerKeyproTools(server: McpServer, client: KeyproClient): vo
         "Preview changing an UNPAID order's payment method (only on-hold=bacs / pending=stripe orders qualify). Returns the recomputed totals for the new method (cheque adds +5%, cod adds a fixed fee; bacs/wallet/stripe add none) and a confirmToken. ALWAYS show the new totals to the user, then call keypro_order_change_payment.",
       inputSchema: {
         orderId: z.number().int().positive(),
-        newMethod: z.enum(["bacs", "cheque", "cod", "wallet", "stripe"]),
+        newMethod: z.enum(["bacs", "cheque", "cod", "wallet", "stripe", "internal"]),
       },
       annotations: READ_ONLY,
     },
@@ -339,7 +339,7 @@ export function registerKeyproTools(server: McpServer, client: KeyproClient): vo
         "Change an UNPAID order's payment method. Requires the confirmToken from keypro_order_change_payment_preview. wallet debits the KEP balance now and fulfils, and raises NO invoice for the order (the balance was already invoiced when it was topped up; the only document is the delivery note at fulfilment); cheque/cod add their fee and fulfil (invoice + keys where due); bacs issues a proforma (awaits transfer); stripe charges the saved card or returns a payment link in payment.paymentUrl. Pass cardId (pm_...) to pick a specific card for stripe.",
       inputSchema: {
         orderId: z.number().int().positive(),
-        newMethod: z.enum(["bacs", "cheque", "cod", "wallet", "stripe"]),
+        newMethod: z.enum(["bacs", "cheque", "cod", "wallet", "stripe", "internal"]),
         confirmToken: z
           .string()
           .describe("Token from keypro_order_change_payment_preview"),
@@ -403,7 +403,7 @@ export function registerKeyproTools(server: McpServer, client: KeyproClient): vo
     {
       title: "One issued licence transfer document",
       description:
-        "The FULL snapshot of one issued licence transfer document: the end customer's data (name, tax number, address, contact) as recorded at issue time, and items[] with keys[] carrying the FULL, unmasked keyValue plus its orderId / orderNumber. The keys come from the stored snapshot, never re-resolved from the licence service, so they never move and never go null. The `pdf` field holds the two download URLs (transfer certificate, decommission statement); they need the same API key, they are not capability links. A document belonging to another account answers not_found, never 403.",
+        "The FULL snapshot of one issued licence transfer document: the end customer's data (name, tax number, address, contact) as recorded at issue time, and items[] with keys[] carrying the FULL, unmasked keyValue plus its orderId / orderNumber. The keys come from the stored snapshot, never re-resolved from the licence service, so they never move and never go null. The `pdf` field holds the download URLs that ACTUALLY belong to this document; its keys follow from `licenseNature` (`used` -> transfer certificate + decommission statement, `new` -> licence certificate, `subscription` -> subscription certificate), so never assume the two old names. They need the same API key, they are not capability links. A document belonging to another account answers not_found, never 403.",
       inputSchema: { documentId: z.number().int().positive() },
       annotations: READ_ONLY,
     },

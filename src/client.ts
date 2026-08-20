@@ -19,6 +19,44 @@ export class KeyproApiError extends Error {
   }
 }
 
+/**
+ * A letoltheto licenc-dokumentum fajtak. EGY forras a CLI-ben: a `licdok pdf`
+ * `--kind` kapuja es a kliens tipusa ugyanezt olvassa, tehat egy uj fajta nem
+ * tud ugy megjelenni, hogy a parancssor elutasitja.
+ *
+ * MELYIK TARTOZIK EGY ADOTT DOKUMENTUMHOZ: a szerver mondja meg, a dokumentum
+ * `licenseNature` mezojen es a `pdf` link-objektum KULCSAIN keresztul.
+ */
+export const LICENSE_DOCUMENT_KINDS = [
+  "atruhazas",
+  "megsemmisites",
+  "licencigazolas",
+  "elofizetes-igazolas",
+] as const;
+
+export type LicenseDocumentKind = (typeof LICENSE_DOCUMENT_KINDS)[number];
+
+/**
+ * A LICENC JELLEGE ember-olvashato cimkei a `products get` kiiratasahoz.
+ *
+ * A szerver a nyers ertéket adja (`used` / `new` / `subscription`), es a `--json`
+ * is azt viszi tovabb - ez a tabla CSAK a magyar emberi kimenetet szolgalja.
+ * ISMERETLEN ERTEKET NEM NYEL LE: a `?? nyers ertek` ag azt irja ki, amit a
+ * szerver kuldott, mert egy uj negyedik jelleg eseten a "nem tudom" hasznosabb,
+ * mint egy nema ures sor.
+ */
+const LICENSE_NATURE_LABELS: Record<string, string> = {
+  used: "használt licenc",
+  new: "új licenc",
+  subscription: "előfizetés",
+};
+
+/** A jelleg magyar cimkeje; ismeretlen erteket valtozatlanul ad vissza. */
+export function licenseNatureLabel(value: unknown): string | null {
+  if (typeof value !== "string" || value === "") return null;
+  return LICENSE_NATURE_LABELS[value] ?? value;
+}
+
 export interface OrderItemInput {
   sku?: string;
   productId?: number;
@@ -41,7 +79,7 @@ export interface AddressInput {
 
 export interface OrderRequestInput {
   items: OrderItemInput[];
-  paymentMethod: "bacs" | "cheque" | "cod" | "wallet" | "stripe";
+  paymentMethod: "bacs" | "cheque" | "cod" | "wallet" | "stripe" | "internal";
   shippingMethodId?: "gls_hd" | "gls_parcelshop" | "combine_free";
   parcelshopId?: string;
   couponCode?: string;
@@ -409,8 +447,13 @@ export class KeyproClient {
    * A dokumentum PDF-je NYERS BAJTKENT. Ez az egyetlen vegpont, aminek a
    * SIKERES valasza nem `{ ok, data }` boritek - a hibai viszont igen, ezert
    * a hibaag ugyanazt a `KeyproApiError`-t adja, mint minden mas hivas.
+   *
+   * A FAJTA A DOKUMENTUM LICENC-JELLEGEBOL kovetkezik, nem a hivo valasztasa:
+   * hasznalt licencnel `atruhazas` + `megsemmisites`, uj licencnel
+   * `licencigazolas`, elofizetesnel `elofizetes-igazolas`. Amit a dokumentum
+   * `pdf` mezoje nem hirdet meg, arra a vegpont 404-et ad.
    */
-  licenseDocumentPdf(id: number, kind: "atruhazas" | "megsemmisites") {
+  licenseDocumentPdf(id: number, kind: LicenseDocumentKind) {
     return this.requestBinary(
       `/api/v1/license-documents/${id}/pdf?kind=${kind}`,
       "application/pdf",

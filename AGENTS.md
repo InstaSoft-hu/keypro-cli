@@ -49,6 +49,11 @@ Payment methods (`--payment`):
 - `wallet` KEP balance (net total deducted immediately). NO invoice is
   issued for such an order: the balance was already invoiced when it was
   topped up, so the order's only document is a delivery note.
+- `internal` internal settlement: available ONLY to the in-house partner
+  account. Every other account is refused with `payment_method_not_allowed`
+  (HTTP 403) already on the preview. No payment is taken, the order is
+  processed immediately, and NO document at all is issued for it - no
+  invoice, no proforma and no delivery note.
 - `card`   saved bank card (Stripe, off-session). If the bank requires
   3DS or there is no saved card, the response contains `payment.paymentUrl`
   - give this link to the user to open in a browser (valid ~1 hour).
@@ -125,7 +130,9 @@ group as a whole - today the variants of a family do not look different.
   rows, no product keys)
 - `keypro licdok get <id>` - one document in full: the end customer's data
   and the FULL, unmasked product keys
-- `keypro licdok pdf <id> [--kind atruhazas|megsemmisites] [--out file]`
+- `keypro licdok pdf <id> [--kind <fajta>] [--out file]` - the KIND that
+  belongs to a document follows from its `licenseNature`; take the URL from
+  the `pdf` field of `licdok get` instead of guessing
 - `keypro invoices list [--order <id>]` / `keypro invoices get <id>`
   (each invoice has a public `downloadUrl` PDF link)
 - `keypro wallet` / `keypro wallet transactions` - KEP balance + history
@@ -224,8 +231,14 @@ over the API:
 - `GET /license-documents/{id}` is the full snapshot: the end customer's data
   and `items[].keys[]` with the FULL, unmasked `keyValue`. Those come from
   the stored snapshot, never re-resolved, so an issued document never moves.
-- `GET /license-documents/{id}/pdf?kind=atruhazas|megsemmisites` streams the
-  PDF itself.
+- `GET /license-documents/{id}/pdf?kind=...` streams the PDF itself. WHICH
+  kinds exist for a document follows from its `licenseNature`
+  (`used` -> `atruhazas` + `megsemmisites`, `new` -> `licencigazolas`,
+  `subscription` -> `elofizetes-igazolas`). The document's `pdf` object
+  carries exactly those URLs; any other kind is 404. You do NOT choose the
+  kind on `POST` - the product's licence nature decides it. That nature is
+  readable BEFORE you order: `GET /products` and `GET /products/{key}`
+  return it as `licenseNature` on the product AND on every variant row.
 - `POST /license-documents` (scope `licenses:write`) ISSUES one. Body:
   `customer` (`name` required), `items[]` of `{ productId, qty }`, optional
   `includeKeys`. Key selection is AUTOMATIC FIFO only - there is no `keyIds`
@@ -267,7 +280,8 @@ unauthorized, forbidden_scope, rate_limited, validation_failed, not_found,
 unknown_product, variant_required, ambiguous_sku, coupon_invalid,
 shipping_required, invalid_parcelshop, cod_requires_physical,
 combine_parent_unavailable, insufficient_wallet_balance,
-wallet_payment_disabled, topup_method_not_allowed, same_payment_method,
+wallet_payment_disabled, topup_method_not_allowed,
+payment_method_not_allowed, same_payment_method,
 confirm_required, confirm_token_invalid, invalid_card, stripe_unavailable,
 order_not_cancelable, order_not_changeable, item_not_allowed,
 no_transferable_keys, license_service_unavailable, lock_busy,
