@@ -21,6 +21,72 @@ Frissítés: `npm i -g @keypro/cli`. A telepített verzió: `keypro --version`.
 
 ---
 
+## 0.1.15 - 2026-09-12
+
+### Gyártói adatok a termék-végpontokon
+
+A `GET /products` és a `GET /products/{key}` válasza három új mezőt visz, a
+termék-soron ÉS minden `variants[]` elemen:
+
+- `manufacturer` - a gyártó (márka) neve, például `Microsoft`. Eddig a márka
+  sehol nem szerepelt önálló mezőként, a terméknévből pedig gépileg nem
+  olvasható ki ("Windows 11 Pro" nem mondja ki, hogy Microsoft).
+- `gtin` - a termék vonalkódja (EAN / UPC / GTIN), csupa számjegy. A
+  webshop-feedek ezen az azonosítón kötik a terméket a saját katalógusukhoz;
+  mentéskor ellenőrizzük a GS1 ellenőrző számjegyet, tehát ami kijön, érvényes.
+- `manufacturerUrl` - a gyártó saját termékoldala, teljes `http(s)` címmel.
+
+Mindhárom `null`, ha az adott soron nincs adat. Egyik sem egyedi, és egyikkel
+sem lehet rendelni: a `POST /orders(/preview)` `items[]` mezője továbbra is
+`sku`-t vagy `productId`-t vár.
+
+**NEM törő:** csak új mezők jöttek, meglévő mező nem tűnt el és nem változott a
+jelentése.
+
+**Figyelmet igényel.** Az öröklés mezőnként eltér. Saját érték nélküli VÁLTOZAT
+a csoportjáét kapja a `manufacturer` és a `manufacturerUrl` mezőn (mint a
+`shortDescription` és társai), a `gtin` és a `manufacturerPartNumber` viszont
+SOSEM öröklődik: azok a konkrét cikk, ill. csomagolás azonosítói, és a
+változatok épp ezek mentén térnek el, tehát egy örökölt érték egy MÁSIK
+terméket nevezne meg a listádban. Ha eddig azt feltételezted, hogy a család
+minden sora ugyanazt az azonosítót viszi, ezt nézd át.
+
+### A keresés a gyártóra és a vonalkódra is illeszt
+
+A `GET /products` `q` paramétere eddig a névre, a cikkszámra és a gyártói
+cikkszámra illesztett; mostantól a `manufacturer` és a `gtin` mezőre is, ugyanazzal
+a részlet-egyezéssel. Egy beszállítói listából kimásolt vonalkód így egy hívásból
+megválaszolja, hogy visszük-e a terméket, a `manufacturer` pedig egy gyártó teljes
+kínálatát adja vissza.
+
+A vonalkód-ág a `q` SZÁMJEGYEIRE illeszt: a szóköz és a kötőjel kiesik belőle,
+ugyanúgy, ahogy mentéskor - a tagolt `590-1234 123457` tehát megtalálja a tárolt
+`5901234123457`-et. Ha a `q` (a szóközt és a kötőjelet elhagyva) nem csak
+számjegyekből áll, a vonalkód-ág kimarad: a `gtin` csupa számjegy, ezért egy
+betűt tartalmazó mintára amúgy sem találna. A másik négy ág ilyenkor is fut.
+
+**NEM törő:** a korábbi keresések ugyanazokat a találatokat adják, legfeljebb
+továbbiakat is. Ha `q`-ra PONTOS találatszámot vártál, az nőhet.
+
+### CLI
+
+- `keypro products get` kiírja a gyártót, a vonalkódot és a gyártói
+  termékoldalt (a `Gyártói cikkszám` sor mellett).
+- `keypro products search` találati táblája új `Gyártó` oszlopot kapott.
+
+**NEM törő** a válasz szempontjából: a `--json` kimenet ugyanaz a szerver-válasz,
+ami új mezőkkel bővült. Az EMBERI táblázat viszont új oszlopot kapott, tehát ha a
+`--json` helyett a szöveges kimenetre építettél feldolgozást, azt nézd át.
+
+### MCP
+
+- `keypro_products_search` és `keypro_product_get` visszaadja a három új mezőt,
+  és a leírásuk kimondja az öröklés szabályát.
+
+**NEM törő:** csak új mezők és bővebb leírás.
+
+---
+
 ## 0.1.14 - 2026-08-21
 
 ### A termék leírása és felsorolás-pontjai a termék-végpontokon

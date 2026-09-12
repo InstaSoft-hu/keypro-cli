@@ -332,7 +332,9 @@ const products = program.command("products").description("termek-katalogus");
 
 products
   .command("search [query]")
-  .description("termekkereses nev, cikkszam vagy gyartoi cikkszam alapjan")
+  .description(
+    "termekkereses nev, cikkszam, gyartoi cikkszam, gyarto vagy vonalkod alapjan",
+  )
   .option("--category <slug>", "kategoria-szures (alkategoriakkal egyutt)")
   .option("--on-sale", "csak akcios termekek", false)
   .option("--sort <mod>", "rendezes: popularity|name|price_asc|price_desc|newest")
@@ -352,10 +354,13 @@ products
           limit: Number(opts.limit),
         });
         output(result, () => {
+          // A GYARTO a nev ELOTT all: a talalati listat a partner rendszerint
+          // marka szerint olvassa, es a termeknevbol ez nem latszik.
           printTable(
-            ["ID", "SKU", "Név", "Katalógus nettó EUR", "Akciós"],
+            ["ID", "Gyártó", "SKU", "Név", "Katalógus nettó EUR", "Akciós"],
             result.products.map((p) => [
               String(p.id),
+              p.manufacturer ? String(p.manufacturer) : "-",
               p.sku ? String(p.sku) : "-",
               String(p.name),
               Number(p.netPriceEur).toFixed(2),
@@ -385,11 +390,19 @@ products
         const text = parseProductText(p);
         printKV([
           ["Termék", `${p.name} (#${p.id})`],
+          // A GYARTO a ket cikkszam FOLOTT: eloszor az derul ki, KINEK a
+          // terméke, utana az, hogy melyik azonosito kie.
+          ["Gyártó", p.manufacturer as string | null],
           ["SKU", p.sku as string | null],
           // A GYARTOI CIKKSZAM kozvetlenul a mienk ALATT: a ket azonosito
           // viszonya igy latszik. A `printKV` a `null`-t kihagyja, tehat a
           // katalogus nagy reszen (ahol nincs) nem marad ures sor.
           ["Gyártói cikkszám", p.manufacturerPartNumber as string | null],
+          // A VONALKOD a gyartoi cikkszam ALATT: a ketto egyutt azonositja a
+          // gyarto cikket a partner sajat termeklistajaban. A `printKV` a
+          // `null`-t kihagyja, tehat adat nelkul nem marad ures sor.
+          ["Vonalkód (EAN/GTIN)", p.gtin as string | null],
+          ["Gyártói termékoldal", p.manufacturerUrl as string | null],
           ["Lista nettó ár", `${Number(p.listNetPriceEur).toFixed(2)} EUR`],
           ["Akciós", p.onSale ? "igen" : "nem"],
           ["A te nettó egységárad", `${Number(p.yourUnitNetEur).toFixed(2)} EUR`],

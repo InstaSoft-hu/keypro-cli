@@ -490,16 +490,22 @@ Ha egyetlen ismert mezőt sem küldtél: `validation_failed`.
 
 ### `GET /api/v1/products` - scope: `read`
 
-Query: `q` (max 200) - **névre, cikkszámra (`sku`) ÉS gyártói cikkszámra
-(`manufacturerPartNumber`) illeszt**, mindhárom mezőn részlet-egyezéssel, kis- és
-nagybetűtől függetlenül -, `category` (kategória-slug, az alkategóriákkal együtt),
+Query: `q` (max 200) - **névre, cikkszámra (`sku`), gyártói cikkszámra
+(`manufacturerPartNumber`), GYÁRTÓRA (`manufacturer`) és VONALKÓDRA (`gtin`)
+illeszt**, mind az öt mezőn részlet-egyezéssel, kis- és nagybetűtől
+függetlenül. A vonalkód-ág a `q` SZÁMJEGYEIRE illeszt: a szóköz és a kötőjel
+kiesik belőle (ugyanúgy, ahogy mentéskor), tehát a `590-1234 123457` alak is
+megtalálja a tárolt `5901234123457`-et; ha a `q` nem csak számjegyekből áll (a
+szóközt és a kötőjelet elhagyva), a vonalkód-ág kimarad, a másik négy pedig
+változatlanul fut -, `category` (kategória-slug, az alkategóriákkal együtt),
 `on_sale` (`true`/`false`), `sort`
 (`popularity` | `name` | `price_asc` | `price_desc` | `newest`),
 `include_variants` (`true`/`false`), `limit` (alap 50), `offset`.
 
 `data`: `total`, `limit`, `offset`, `products[]`. Egy termék:
 
-`id`, `slug`, `sku`, `manufacturerPartNumber`, `name`,
+`id`, `slug`, `sku`, `manufacturerPartNumber`, `manufacturer`, `gtin`,
+`manufacturerUrl`, `name`,
 `type` (`simple` | `variable`),
 `shortDescription`, `shortDescriptionBullets[]`, `description`,
 `groupProductId`,
@@ -537,12 +543,15 @@ tehát rendelés ELŐTT megkérdezhető.
 
 A `variants[]` **mindig jelen van**: `variable` típusú soron a publikált
 változatokkal, minden más soron üres tömbként - `include_variants` nélkül is.
-Elemei: `productId`, `sku`, `manufacturerPartNumber`, `name`, `attributes`,
+Elemei: `productId`, `sku`, `manufacturerPartNumber`, `manufacturer`, `gtin`,
+`manufacturerUrl`, `name`, `attributes`,
 `netPriceEur`, `licenseNature`, `shortDescription`,
-`shortDescriptionBullets[]`, `description`, `images[]`. A jelleg és a gyártói
-cikkszám a változat SAJÁT értéke, és egy családon belül is eltérhet - a
-csoport-sor nem rendelhető, tehát a változaté a mérvadó. A három szöveg-mező
-viszont saját érték hiányában a CSOPORTÉ (lásd a **Termékszöveg** szakaszt).
+`shortDescriptionBullets[]`, `description`, `images[]`. A jelleg, a gyártói
+cikkszám és a vonalkód a változat SAJÁT értéke, és egy családon belül is
+eltérhet - a csoport-sor nem rendelhető, tehát a változaté a mérvadó. A három
+szöveg-mező, valamint a `manufacturer` és a `manufacturerUrl` viszont saját
+érték hiányában a CSOPORTÉ (lásd a **Termékszöveg** és a **Gyártói adatok**
+szakaszt).
 Az `include_variants=true` azt kapcsolja be, hogy a változat-sorok ÖNÁLLÓ
 találatként is megjelenjenek a `products[]` tömbben (különben csak a
 csoport-sor jön).
@@ -577,6 +586,38 @@ megválaszolja, hogy visszük-e a terméket. A találatból a `productId` vagy a
 gyártói cikkszámot: a `{key}` továbbra is azonosító, slug vagy `sku` - a gyártói
 szám nem egyedi, tehát nem azonosítana egyetlen sort.
 
+#### Gyártói adatok
+
+A gyártói cikkszám mellett három további mező írja le a gyártó termékét. Mind a
+három ott van a termék-soron ÉS minden `variants[]` elemen, és `null`, ha az
+adott soron nincs adat:
+
+- **`manufacturer`** - a gyártó (márka) neve, például `Microsoft` vagy `ESET`.
+  Ez az egyetlen gépi módja egy gyártó teljes kínálatát lekérni: a terméknévből
+  a márka nem olvasható ki (a "Windows 11 Pro" nem mondja ki, hogy Microsoft).
+  A `q` erre is illeszt.
+- **`gtin`** - a termék vonalkódja (EAN / UPC / GTIN), csupa számjegy. A
+  webshop-feedek (Google Shopping, Árukereső) ezen az azonosítón kötik a
+  terméket a saját katalógusukhoz. A mentéskor **ellenőrizzük a GS1 ellenőrző
+  számjegyet**, tehát ami innen kijön, az érvényes GTIN. A `q` erre is illeszt,
+  a beírt kód szóközeit és kötőjeleit elhagyva (lásd a `GET /products` `q`
+  leírását).
+- **`manufacturerUrl`** - a gyártó saját termékoldala, teljes `http(s)` címmel.
+  A gyártói dokumentációra, rendszerkövetelményre tudsz róla átkötni.
+
+**Egyik sem egyedi, és egyikkel sem lehet rendelni**: a `POST /orders(/preview)`
+`items[]` mezője továbbra is `sku`-t vagy `productId`-t vár.
+
+**Az öröklés MEZŐNKÉNT eltér, és ez szándékos.** Saját érték nélküli VÁLTOZAT a
+csoportjáét kapja a `manufacturer` és a `manufacturerUrl` mezőn - egy család
+tagjának szükségképpen ugyanaz a gyártója, a gyártói oldal pedig HIVATKOZÁS (a
+boltban a változat-slug is a csoport oldalára irányít). A `gtin` és a
+`manufacturerPartNumber` viszont **SOSEM öröklődik**: azok a konkrét cikk, ill.
+a konkrét csomagolás AZONOSÍTÓI, és a változatok épp ezek mentén térnek el
+(férőhely-szám, csomagméret), tehát egy örökölt érték egy MÁSIK terméket
+nevezne meg a te listádban. Visszafelé egyik sem öröklődik: a csoport-sor sosem
+veszi át egy változata értékét.
+
 ### `GET /api/v1/products/{key}` - scope: `read`
 
 A `{key}` lehet numerikus termékazonosító, slug vagy cikkszám (ebben a
@@ -585,7 +626,8 @@ sorrendben próbálja).
 `data`: a lista mezőin túl **`yourUnitNetEur`**,
 `yourDiscountPercent`, `notPurchasable`, `variantAttributes`,
 `group: { productId, slug, name } | null`, és a bővebb `variants[]`
-(`productId`, `slug`, `sku`, `manufacturerPartNumber`, `name`, `attributes`,
+(`productId`, `slug`, `sku`, `manufacturerPartNumber`, `manufacturer`, `gtin`,
+`manufacturerUrl`, `name`, `attributes`,
 `listNetPriceEur`,
 `netPriceEur`, `onSale`, `yourUnitNetEur`, `yourDiscountPercent`,
 `isVirtual`, `fulfillmentType`, `licenseNature`, `stock`, `shortDescription`,
