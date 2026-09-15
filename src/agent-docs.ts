@@ -55,7 +55,14 @@ Ordering is a two-step preview + confirm flow to prevent accidental orders:
 Payment methods (\`--payment\`):
 - \`bacs\`   bank transfer: order goes on-hold, a proforma invoice
   (dijbekero) is issued; keys are delivered after payment arrives.
-- \`cheque\` 8-day payment terms (+5% fee on net product total).
+- \`cheque\` 8-day payment terms: available ONLY to accounts KeyPro has
+  enabled for it. Every other account is refused with
+  \`payment_method_not_allowed\` (HTTP 403) already on the preview. The order
+  counts as settled on creation, so the product key goes out BEFORE the money
+  arrives and the order cannot be cancelled afterwards. There is a +5%
+  convenience fee on the net product total; a few accounts are exempt by
+  agreement, so always read the fee from the preview's \`payment.fees[]\`, never
+  compute it (\`totals\` carries no fee line of its own).
 - \`cod\`    cash on delivery (physical shipments only, +1.5 EUR fee).
 - \`wallet\` KEP balance (net total deducted immediately). NO invoice is
   issued for such an order: the balance was already invoiced when it was

@@ -21,6 +21,38 @@ Frissítés: `npm i -g @keypro/cli`. A telepített verzió: `keypro --version`.
 
 ---
 
+## 0.1.16 - 2026-09-15
+
+### A 8 napos fizetési határidő (`cheque`) fiókhoz kötött lett
+
+**TÖRŐ** azoknak, akik `cheque` fizetési móddal rendelnek. A 8 napos határidő
+hitel: a termékkulcs a pénz beérkezése előtt kimegy, és a rendelés utólag nem
+mondható le. Ezért mostantól partnerenként engedélyezzük, a belső elszámolás
+(`internal`) mintájára.
+
+Amit az integrációdban látsz, ha a fiókod NEM jogosult rá:
+
+- `POST /orders/preview`, `POST /orders`, `POST /orders/{id}/payment/preview`
+  és `POST /orders/{id}/payment`: **403 `payment_method_not_allowed`**. Az
+  előnézeten is, tehát tiltott módra `confirmToken`-t sem kapsz.
+- A hibaüzenet mostantól megmondja, MELYIK módról van szó. Eddig minden
+  `payment_method_not_allowed` a belső elszámolás mondatát adta vissza, akkor
+  is, ha a `cheque`-et utasítottuk el - ez félrevezető volt.
+
+Ha eddig `cheque`-kel rendeltél és most 403-at kapsz, szólj a KeyPro
+kapcsolattartódnak: a jogosultság fiókszinten adható. Addig válassz másik
+fizetési módot (`bacs`, `wallet`, `stripe`, `cod`).
+
+### Figyelmet igényel: a `cheque` +5% díja nem minden fiókon jár
+
+A kényelmi díj továbbra is +5% a nettó termékösszegre, de néhány fiókon
+megállapodás szerint elmarad. **A díjat sose számold**, mindig az előnézet
+válaszából olvasd ki (`POST /orders/preview` -> `payment.fees[]`, illetve
+`POST /orders/{id}/payment/preview` -> `fees[]` / `feeDeltaEur`). A `totals`
+nem visz külön díj-tételt: az összegeibe már bele van számolva. Ez nem törő:
+a mezők és a végpontok változatlanok, csak a beégetett 5%-os számolás adhat
+mostantól rossz végösszeget.
+
 ## 0.1.15 - 2026-09-12
 
 ### Gyártói adatok a termék-végpontokon

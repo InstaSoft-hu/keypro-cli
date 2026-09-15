@@ -23,7 +23,7 @@ export type { KeyproClient, KeyproClientOptions } from "./client.js";
  * (korabban a web 0.1.4-en ragadt). Kiadaskor a package.json-nal egyutt ez az
  * egy konstans valtozik.
  */
-export const KEYPRO_MCP_VERSION = "0.1.15";
+export const KEYPRO_MCP_VERSION = "0.1.16";
 
 /**
  * A szerver `instructions` mezoje (MCP initialize). A kliens modellje ezt latja
@@ -95,7 +95,7 @@ const orderRequestShape = {
   paymentMethod: z
     .enum(["bacs", "cheque", "cod", "wallet", "stripe", "internal"])
     .describe(
-      "bacs=bank transfer (proforma first), cheque=8-day terms (+5%), cod=cash on delivery, wallet=KEP balance (NO invoice for such an order, only a delivery note - the balance is invoiced when it is topped up), stripe=saved card, internal=internal settlement, available ONLY to the in-house partner account (every other account gets payment_method_not_allowed, HTTP 403, already on the preview): no payment is taken and NO document at all is issued for the order - no invoice, no proforma and no delivery note",
+      "bacs=bank transfer (proforma first), cheque=8-day terms, available ONLY to accounts KeyPro has enabled for it (every other account gets payment_method_not_allowed, HTTP 403, already on the preview); settled on creation, so the key goes out before the money arrives and the order cannot be cancelled afterwards; +5% convenience fee on the net product total, waived on a few accounts by agreement, so read the fee from the preview's payment.fees[] (totals carries no fee line of its own), cod=cash on delivery, wallet=KEP balance (NO invoice for such an order, only a delivery note - the balance is invoiced when it is topped up), stripe=saved card, internal=internal settlement, available ONLY to the in-house partner account (every other account gets payment_method_not_allowed, HTTP 403, already on the preview): no payment is taken and NO document at all is issued for the order - no invoice, no proforma and no delivery note",
     ),
   shippingMethodId: z
     .enum(["gls_hd", "gls_parcelshop", "combine_free"])
@@ -325,7 +325,7 @@ export function registerKeyproTools(server: McpServer, client: KeyproClient): vo
     {
       title: "Preview a payment change",
       description:
-        "Preview changing an UNPAID order's payment method (only on-hold=bacs / pending=stripe orders qualify). Returns the recomputed totals for the new method (cheque adds +5%, cod adds a fixed fee; bacs/wallet/stripe add none) and a confirmToken. ALWAYS show the new totals to the user, then call keypro_order_change_payment.",
+        "Preview changing an UNPAID order's payment method (only on-hold=bacs / pending=stripe orders qualify). Returns the recomputed totals for the new method (cheque and cod add a fee, bacs/wallet/stripe add none) and a confirmToken. Read every fee from newTotals/fees, never compute it: the cheque fee is +5% on most accounts and waived on a few by agreement. cheque and internal are account-gated - an account without permission is refused with payment_method_not_allowed (HTTP 403) already here. ALWAYS show the new totals to the user, then call keypro_order_change_payment.",
       inputSchema: {
         orderId: z.number().int().positive(),
         newMethod: z.enum(["bacs", "cheque", "cod", "wallet", "stripe", "internal"]),
@@ -341,7 +341,7 @@ export function registerKeyproTools(server: McpServer, client: KeyproClient): vo
       title: "Change payment method",
       annotations: writeHints({ destructive: true, idempotent: false }),
       description:
-        "Change an UNPAID order's payment method. Requires the confirmToken from keypro_order_change_payment_preview. wallet debits the KEP balance now and fulfils, and raises NO invoice for the order (the balance was already invoiced when it was topped up; the only document is the delivery note at fulfilment); cheque/cod add their fee and fulfil (invoice + keys where due); bacs issues a proforma (awaits transfer); stripe charges the saved card or returns a payment link in payment.paymentUrl. Pass cardId (pm_...) to pick a specific card for stripe.",
+        "Change an UNPAID order's payment method. Requires the confirmToken from keypro_order_change_payment_preview. wallet debits the KEP balance now and fulfils, and raises NO invoice for the order (the balance was already invoiced when it was topped up; the only document is the delivery note at fulfilment); cheque/cod add their fee and fulfil (invoice + keys where due), and cheque is account-gated (payment_method_not_allowed, HTTP 403, without permission); bacs issues a proforma (awaits transfer); stripe charges the saved card or returns a payment link in payment.paymentUrl. Pass cardId (pm_...) to pick a specific card for stripe.",
       inputSchema: {
         orderId: z.number().int().positive(),
         newMethod: z.enum(["bacs", "cheque", "cod", "wallet", "stripe", "internal"]),

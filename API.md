@@ -236,7 +236,7 @@ mindenhol máshol. A gyakorlati szabály: ha a válasz `Content-Type`-ja
 | `insufficient_wallet_balance` | 400 | kevés a KEP egyenleg; `details.balanceEurNet`, `details.requiredNetEur` |
 | `wallet_payment_disabled` | 400 | a KEP egyenleggel fizetés ki van kapcsolva |
 | `topup_method_not_allowed` | 400 | egyenlegfeltöltő rendelésre ez a fizetési mód nem megengedett |
-| `payment_method_not_allowed` | 403 | ez a fizetési mód a te fiókodból nem választható (ma: `internal`, a belső elszámolás) |
+| `payment_method_not_allowed` | 403 | ez a fizetési mód a te fiókodból nem választható. Két mód fiókhoz kötött: `internal` (belső elszámolás) és `cheque` (8 napos fizetési határidő). A hibaüzenet megmondja, melyikről van szó |
 | `same_payment_method` | 400 | a rendelés már ezen a fizetési módon van |
 | `invalid_card` | 400 | a megadott `cardId` nem a te mentett kártyád |
 | `stripe_unavailable` | 502 | a kártyás fizetés szolgáltatója nem elérhető |
@@ -715,7 +715,7 @@ Fizetési módok:
 | `paymentMethod` | Mit jelent |
 | --- | --- |
 | `bacs` | átutalás: a rendelés `on-hold`, díjbekérő készül, kulcs a beérkezés után |
-| `cheque` | 8 napos fizetési határidő (+5% díj a nettó termékösszegre) |
+| `cheque` | 8 napos fizetési határidő: **csak engedélyezett fiókból** választható, minden más fiók `payment_method_not_allowed` (403) hibát kap már az előnézeten is. A rendelés a létrehozáskor rendezettnek számít, tehát a termékkulcs a pénz beérkezése ELŐTT kimegy, és a rendelés utólag nem mondható le. +5% kényelmi díj a nettó termékösszegre, néhány fiókon megállapodás szerint nincs díj - ezért a díjat mindig az előnézet `payment.fees[]` tételéből olvasd ki (a `totals` nem visz külön díj-sort), sose számold |
 | `cod` | utánvét, csak fizikai kiszállításnál (+1,5 EUR) |
 | `wallet` | KEP egyenleg, azonnal terhelődik; ilyen rendelésről számla NEM készül, csak szállítólevél (az egyenleget a feltöltéskor számláztuk) |
 | `stripe` | mentett bankkártya (off-session) |
@@ -762,6 +762,12 @@ Hiba: `order_not_cancelable` (409).
 Törzs: `newMethod`. `data`: `currentMethod`, `newMethod`,
 `newTotals: { netTotalEur, grossTotalEur }`, `feeDeltaEur`, `fees[]`,
 `confirmToken`, `confirmTokenExpiresAt`, `wallet`, `note`.
+
+A fiókhoz kötött módok (`internal`, `cheque`) itt is 403
+`payment_method_not_allowed` hibát adnak, ha a fiókod nem jogosult rájuk -
+tehát tiltott módra nem kapsz `confirmToken`-t sem. A díjat mindig a válasz
+`fees[]` / `feeDeltaEur` mezőjéből olvasd ki: a `cheque` +5%-a néhány fiókon
+megállapodás szerint elmarad.
 
 ### `POST /api/v1/orders/{id}/payment` - scope: `orders:write`
 
