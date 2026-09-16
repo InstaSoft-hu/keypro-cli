@@ -4,9 +4,15 @@
  * AI-agentek utasitasnyelve tipikusan angol.
  *
  * Az ar-szerzodes mondata NEM itt lakik: a `price-contract.ts` a tulajdonosa,
- * mert ugyanaz az allitas kell az MCP `instructions` mezojebe is.
+ * mert ugyanaz az allitas kell az MCP `instructions` mezojebe is. Ugyanez all a
+ * dropshipping elutasitasi kodjaira: azok tulajdonosa a
+ * `dropshipping-contract.ts`, mert ugyanazt a mondatot a ket MCP tool-leiras is
+ * hordozza.
  */
 
+import {
+  dropshippingRefusalSentence,
+} from "./dropshipping-contract.js";
 import { priceContract } from "./price-contract.js";
 
 export const AGENT_DOCS = `# KeyPro CLI - AI agent guide
@@ -80,6 +86,55 @@ Payment methods (\`--payment\`):
 Physical products need \`--shipping gls_hd|gls_parcelshop|combine_free\`;
 for gls_parcelshop also \`--parcelshop <ID>\`
 (search: \`keypro parcelshops search <city|zip>\`).
+
+## Dropshipping (post the parcel in the RESELLER's name)
+
+\`--dropshipping\` on \`order preview\` / \`order create\` (REST: a \`dropshipping\`
+boolean in the body; MCP: the same field on keypro_order_preview /
+keypro_order_create) means we post the parcel straight to YOUR end customer, IN
+YOUR NAME: your own name and address on the label as sender, and nothing on or
+in the parcel identifies KeyPro. Into the box go your own licence transfer
+documents and, if you uploaded one, your own invoice.
+
+- It needs an order with its OWN parcel: \`--shipping gls_hd\` or
+  \`gls_parcelshop\`. ${dropshippingRefusalSentence("order")}
+- Give the END CUSTOMER's data in \`--shipping-*\` (REST: \`shipping\`): last AND
+  first name, a phone number or an e-mail, and the address (postcode, city,
+  street) - on a parcelshop order too. Leaving the whole block out does NOT stop
+  the order, but the parcel is not posted until the data is there, and the
+  account gets a reminder e-mail. With dropshipping a key you leave OUT of the
+  block is NOT filled from your saved profile (it would put YOUR data in the
+  recipient's place): lastName, address1, city, postcode and country are then
+  validation_failed (400, named in details.missing), a missing firstName or
+  phone/email only holds the posting. \`--shipping-email\` is stored on a
+  dropshipping order and GLS notifies the recipient on it (on a normal order it
+  is ignored; GLS uses your billing e-mail).
+- NEVER together with cash on delivery (\`cod\`), in either direction. The
+  courier would collect the order total - your own purchase price - from your
+  end customer, into the shop's account. \`keypro order change-payment\` refuses
+  it too: ${dropshippingRefusalSentence("payment")}
+- The SENDER comes from your own billing data on the order, never from a
+  separate field. If that is incomplete the parcel is REFUSED rather than
+  posted in KeyPro's name.
+- Changeable afterwards:
+  \`keypro order dropshipping <orderId> [--off]\` (REST:
+  \`POST /orders/{id}/dropshipping\`, MCP: keypro_order_set_dropshipping).
+  Switching it ON:
+  ${dropshippingRefusalSentence("toggle")} Switching it OFF
+  is always allowed while the parcel is open. Read the current value back from
+  \`keypro order get <id>\` (the \`dropshipping\` field).
+- Your own invoice for the end customer:
+  \`keypro order attach <orderId> <file.pdf...>\` and
+  \`keypro order attachments <orderId>\` (REST: \`POST\` / \`GET
+  /orders/{id}/attachments\`, MCP: keypro_order_attach_file /
+  keypro_order_attachments). PDF only (checked on the CONTENT), 5 files per
+  order, 8 MB each, 16 MB together, 10 uploads per minute. The upload POST is
+  the ONE endpoint whose REQUEST is \`multipart/form-data\` instead of JSON (the
+  file goes in the \`attachments\` field); its response is the normal envelope.
+  Refusals: \`order_not_attachable\` (409, the parcel has left) and
+  \`attachment_rejected\` (400, the file itself). The MCP tool takes a LOCAL
+  FILE PATH, never the file content - it runs on your machine and reads the
+  file itself.
 
 ## Variable products (tiers, editions)
 
@@ -329,6 +384,9 @@ code): the \`API.md\` shipped in this package, and https://keypro.hu/api
 unauthorized, forbidden_scope, rate_limited, validation_failed, not_found,
 unknown_product, variant_required, ambiguous_sku, coupon_invalid,
 shipping_required, invalid_parcelshop, cod_requires_physical,
+dropshipping_requires_shipping, dropshipping_requires_own_parcel,
+dropshipping_has_combined_orders, dropshipping_locked, order_not_attachable,
+attachment_rejected,
 combine_parent_unavailable, insufficient_wallet_balance,
 wallet_payment_disabled, topup_method_not_allowed,
 payment_method_not_allowed, same_payment_method,

@@ -221,7 +221,7 @@ mindenhol máshol. A gyakorlati szabály: ha a válasz `Content-Type`-ja
 | `unauthorized` | 401 | hiányzó, nem `Bearer` alakú, érvénytelen, visszavont vagy lejárt kulcs |
 | `forbidden_scope` | 403 | a kulcsnak nincs meg a végponthoz kellő scope-ja |
 | `rate_limited` | 429 | átlépted a percenkénti keretet; `details.retryAfterSeconds` |
-| `validation_failed` | 400 | séma-hiba; `details` = `[{ path, message }]`, vagy hiányzó törzsadat esetén `details.missing` |
+| `validation_failed` | 400 | séma-hiba; `details` = `[{ path, message }]`, hiányzó törzsadat esetén `details.missing`, érvénytelen formátumú mezőnél (pl. `shipping.email`) `details.invalid` |
 | `not_found` | 404 | nincs ilyen rendelés / számla / kulcs, vagy ismeretlen végpont |
 | `unknown_product` | 400 / 404 | ismeretlen SKU vagy termékazonosító; `details.unknownSkus` / `details.unknownProductIds` |
 | `ambiguous_sku` | 400 | a SKU több termékre illik; `details.ambiguousSkus` - adj `productId`-t. **Ma már nem fordulhat elő**: a cikkszám adatbázis-szinten egyedi (lásd a `GET /api/v1/products` szakaszt). A kód a szerződés része marad, a feloldó ellenőrzése is - a kliensnek nincs teendője |
@@ -238,6 +238,13 @@ mindenhol máshol. A gyakorlati szabály: ha a válasz `Content-Type`-ja
 | `topup_method_not_allowed` | 400 | egyenlegfeltöltő rendelésre ez a fizetési mód nem megengedett |
 | `payment_method_not_allowed` | 403 | ez a fizetési mód a te fiókodból nem választható. Két mód fiókhoz kötött: `internal` (belső elszámolás) és `cheque` (8 napos fizetési határidő). A hibaüzenet megmondja, melyikről van szó |
 | `same_payment_method` | 400 | a rendelés már ezen a fizetési módon van |
+| `order_not_attachable` | 409 | a rendeléshez már nem tölthető fel fájl (elindult a feladás, vagy nincs hozzá szállítmány) |
+| `dropshipping_requires_shipping` | 400 / 409 | `dropshipping: true` tisztán digitális rendelésen: nincs csomag, amit a végfelhasználónak feladnánk. 400 a rendelésfelvételen, 409 az utólagos átállításon |
+| `dropshipping_requires_own_parcel` | 400 / 409 | `dropshipping: true` **összecsomagolt** (`combine_free`) rendelésen: annak nincs saját küldeménye, az áru a szülő rendelés csomagjában utazik. 400 a rendelésfelvételen, 409 az utólagos átállításon |
+| `dropshipping_excludes_cod` | 400 / 409 | **utánvét (`cod`) és dropshipping együtt** - egyik irányban sem. A futár a rendelés végösszegét (a te beszerzési áradat) szedné be a végfelhasználódtól, a bolt számlájára. 400 a rendelésfelvételen és a fizetésimód-váltáson (annak előnézetén is), 409 az utólagos átállításon |
+| `dropshipping_has_combined_orders` | 409 | `dropshipping: true` olyan rendelésen, amelynek a csomagjában **már utazik** hozzácsomagolt (`combine_free`) rendelés. `details.combinedChildren` megnevezi őket; előbb azoknak kell külön küldemény |
+| `dropshipping_locked` | 409 | a dropshipping már nem módosítható: a GLS-címke igényelve van, vagy nincs szállítmány |
+| `attachment_rejected` | 400 | a feltöltött fájl nem felel meg (nem PDF, túl nagy, vagy betelt a keret, vagy épp fut egy másik feltöltés ugyanarra a rendelésre); az üzenet megmondja, melyik |
 | `invalid_card` | 400 | a megadott `cardId` nem a te mentett kártyád |
 | `stripe_unavailable` | 502 | a kártyás fizetés szolgáltatója nem elérhető |
 | `order_not_cancelable` | 409 | a rendelés ebben az állapotban nem mondható vissza |
@@ -283,6 +290,9 @@ sosem lesz rövidebb, mert mindig ugyanaz jön vissza).
 | `GET /api/v1/cards` | `{ stripeEnabled, cards }` |
 | `GET /api/v1/license-keys` | `{ products }` |
 | `GET /api/v1/shipping/parcelshops` | `{ truncated, parcelshops }` |
+| `POST /api/v1/orders/{id}/dropshipping` | `{ orderId, dropshipping, changed }` |
+| `GET /api/v1/orders/{id}/attachments` | `{ attachments }` |
+| `POST /api/v1/orders/{id}/attachments` | `{ attachments }` (multipart kérés) |
 | `GET /api/v1/orders/{id}/keys` | `{ orderId, orderStatus, keys, licenses }` |
 
 A `GET /shipping/parcelshops` a hosszú találatlistát csonkolja, és ezt a saját
@@ -667,7 +677,46 @@ Törzs: `items[]` (1-50 elem, elemenként `sku` **vagy** `productId`, plusz
 `shippingMethodId` (`gls_hd` | `gls_parcelshop` | `combine_free`),
 `parcelshopId`, `combineWithOrderId`, `couponCode`, `currency`
 (`EUR` | `HUF`, alap `EUR`), `billing`, `shipping`, `taxNumber`,
-`internalReference`, `cardId`.
+`internalReference`, `dropshipping`, `cardId`.
+
+A **`dropshipping`** (logikai, alap `false`) azt jelenti, hogy a csomagot a **te
+végfelhasználódnak** adjuk fel, **a te nevedben**: a címkén a te neved és címed
+lesz a feladó, és sem a küldeményen, sem a dobozban nem lesz KeyPro-felirat.
+
+Csak olyan rendelésen választható, amelynek **saját küldeménye** van, tehát
+`shippingMethodId` = `gls_hd` vagy `gls_parcelshop`. Tisztán digitális
+rendelésen `400` `dropshipping_requires_shipping` (nincs csomag), összecsomagolt
+(`combine_free`) rendelésen `400` `dropshipping_requires_own_parcel`: annak nincs
+saját küldeménye, az áru a **szülő** rendelés csomagjában, annak a feladójával és
+címzettjével utazik.
+
+**Utánvéttel (`cod`) soha nem választható együtt**: `400`
+`dropshipping_excludes_cod`. A futár a rendelés végösszegét - a te beszerzési
+áradat - szedné be a végfelhasználódtól, a bolt számlájára.
+
+**A `shipping` blokk** a `billing`-hez hasonlóan mezőnkénti felüldefiniálás:
+normál rendelésen a blokkból **kihagyott** kulcsot a fiókodban mentett
+szállítási adat tölti ki. **Dropshippingnél NEM**: ott a blokk a
+**végfelhasználód** adatait hordozza, tehát egy kihagyott kulcs hiány marad -
+különben a címzett helyére a te saját neved vagy telefonszámod kerülne. Ilyenkor
+a `lastName`, `address1`, `city`, `postcode` és `country` hiánya `400`
+`validation_failed` (a `details.missing` megnevezi), a `firstName` és az
+elérhetőség (`phone` vagy `email`) hiánya pedig a rendelést nem, csak a feladást
+állítja meg (emlékeztető e-mailt küldünk). Ha a végfelhasználó adatait
+rendeléskor még nem tudod, a `shipping` blokkot hagyd el egészen. Ajánlás: küldd
+el mindig az összes címzett-mezőt, akkor a feladás sem akad el.
+
+A **`shipping.email`** **dropshipping rendelésen** a rendelésre kerül: a GLS
+ezen értesíti a címzettet, és az elérhetőség feltételét a telefonszám nélkül is
+teljesíti. Nem kötelező, üresen is mehet; érvénytelen formátumban `400`
+`validation_failed` (`details.invalid: ["shipping.email"]`). **Normál
+rendelésen a mezőt a szerver nem menti és nem is ellenőrzi**: ott a GLS-értesítő
+a számlázási e-mail címedre megy. A `shippingAddress` válaszmező pontosan azt
+mutatja, ami a rendelésre kerül.
+
+A csomagba a te átruházási dokumentumaidat tesszük, és ha feltöltötted, a saját
+számládat is (`POST /orders/{id}/attachments`). A feladásig még átállítható, és a
+`GET /orders/{id}` válaszának `dropshipping` mezőjéből visszaolvasható.
 
 `data`: `lines[]` (`productId`, `sku`, `name`, `qty`, `unitNetEur`,
 `lineNetEur`, `lineGrossEur`, `discountPercent`),
@@ -745,7 +794,8 @@ ebből a rendelésből származó kulcsot köt le.
 A rendelés-részletező a lista mezőin túl: `items[]` (`id`, `productId`,
 `name`, `qty`, `unitNetEur`, `lineNetEur`, `lineTaxEur`), `billing`,
 `shipping`, `shippingMethod`, `glsParcelshop`, `couponDiscountEur`,
-`taxNumber`, `internalReference`. (Az `itemNames` a részletezőn nincs.)
+`taxNumber`, `internalReference`, `dropshipping`. (Az `itemNames` a részletezőn
+nincs.)
 
 Idegen rendelés `not_found`-ot ad, nem 403-at.
 
@@ -769,6 +819,12 @@ tehát tiltott módra nem kapsz `confirmToken`-t sem. A díjat mindig a válasz
 `fees[]` / `feeDeltaEur` mezőjéből olvasd ki: a `cheque` +5%-a néhány fiókon
 megállapodás szerint elmarad.
 
+**Dropshipping rendelésen a `cod` már az előnézeten elutasított**: `400`
+`dropshipping_excludes_cod`, ugyanazzal a kóddal és mondattal, mint a
+megerősítés (`POST /orders/{id}/payment`) - tehát erre a váltásra
+`confirmToken`-t sem kapsz. Ugyanígy az előnézeten jön a `400`
+`cod_requires_physical` is, ha a rendelésnek nincs saját GLS-küldeménye.
+
 ### `POST /api/v1/orders/{id}/payment` - scope: `orders:write`
 
 Törzs: `newMethod`, `confirmToken` (kötelező), `cardId` (opcionális,
@@ -776,6 +832,86 @@ Törzs: `newMethod`, `confirmToken` (kötelező), `cardId` (opcionális,
 `payment: { method, status, charged, paymentUrl, declineCode, walletBalanceAfterEur, note }`.
 
 Figyelem: a `wallet` és a `stripe` irány **valódi pénzt mozgat**.
+
+**Dropshipping rendelést nem lehet `cod`-ra váltani**: `400`
+`dropshipping_excludes_cod`. A futár a rendelés végösszegét - a partner
+beszerzési árát - szedné be a végfelhasználótól, a bolt számlájára. Ez ugyanaz a
+tiltás, mint a rendelésfelvételen, csak a másik irányból.
+
+### `POST /api/v1/orders/{id}/dropshipping` - scope: `orders:write`
+
+A **dropshipping** be- vagy kikapcsolása egy meglévő rendelésen. Törzs:
+`{ "dropshipping": true }`. `data`: `orderId`, `dropshipping`, `changed`
+(`false`, ha már ezen az értéken állt).
+
+Bekapcsolni csak **saját küldeményt** hordozó rendelésen lehet (`gls_hd` /
+`gls_parcelshop`): tisztán digitális rendelésen `409`
+`dropshipping_requires_shipping`, összecsomagolt (`combine_free`) rendelésen
+`409` `dropshipping_requires_own_parcel`. A kód a KONKRÉT hiányt nevezi meg - a
+két helyzet két külön teendőt ad. **Kikapcsolni ezeknél a kapuknál mindig
+lehet** - az a biztonságos irány. Ha viszont a csomag már nem nyitott (lásd
+lentebb), a beállítás egyáltalán nem módosítható, **kikapcsolni sem**: a címke
+igénylése után a feladó neve már eldőlt, és a csomagon akkor is a partner neve
+áll.
+
+**Utánvétes (`cod`) rendelésen sem kapcsolható be**: `409`
+`dropshipping_excludes_cod`. A futár a rendelés végösszegét - a te beszerzési
+áradat - szedné be a végfelhasználódtól, a bolt számlájára, tehát a vevőd
+megtudná, mennyiért vetted az árut, és olyan tartozást fizetne, ami nem az övé.
+A tiltás mindkét irányban áll: egy már dropshipping rendelést sem lehet `cod`-ra
+váltani (`POST /orders/{id}/payment` -> `400` `dropshipping_excludes_cod`).
+
+Akkor sem kapcsolható be, ha **ebben a csomagban már utazik** egy hozzácsomagolt
+(`combine_free`) rendelés: `409` `dropshipping_has_combined_orders`, és a
+`error.details.combinedChildren` megnevezi őket (`id`, `number`). Az abban lévő
+áru a te saját rendelésed, tehát a végfelhasználódhoz menne ki, miközben a
+kaszkád a gyereket `prepared-shipping`-be teszi (szállítólevél + termékkulcs),
+tehát a visszajelzés az, hogy elment. Előbb a hozzácsomagolt rendelésnek kell
+külön küldeményt választani.
+
+Azon túl csak addig módosítható, amíg a csomag **még nyitva van**: a rendelés még
+a raktárban van, és még **nem igényeltünk rá GLS-címkét**. Ez tény-ellenőrzés,
+nem státusz-ellenőrzés: a címke igénylésekor a **feladó neve már eldőlt**, ezért
+egy későbbi átállítás csak félrevezetés lenne. Egyébként `409`
+`dropshipping_locked`.
+
+Minden változásról belső rendelés-jegyzet készül. Az aktuális érték a
+`GET /orders/{id}` válaszának `dropshipping` mezőjében is benne van.
+
+### `GET /api/v1/orders/{id}/attachments` - scope: `read`
+
+A rendeléshez feltöltött fájlok listája.
+
+`data`: `attachments[]` (`id`, `filename`, `sizeBytes`, `mimeType`,
+`createdAt`, `downloadPath`).
+
+A `downloadPath` **bejelentkezett (böngészős) letöltési út**, API kulccsal nem
+hívható: a fájl a te végfelhasználód adatait tartalmazza, ezért csak a saját
+fiókodból, sütis munkamenettel tölthető le.
+
+### `POST /api/v1/orders/{id}/attachments` - scope: `orders:write`
+
+A **saját, végfelhasználódnak kiállított számlád** feltöltése a rendeléshez.
+Dropshipping küldeménynél ezt kinyomtatjuk és a csomagba tesszük. A fájl
+tartalmát nem ellenőrizzük és nem dolgozzuk fel.
+
+**Ez az egyetlen végpont, aminek a KÉRÉSE nem JSON**: `multipart/form-data`, a
+fájl az `attachments` mezőben (egy kérésben több is). A boríték JSON-t visz,
+bájtokat nem - egy base64 mező ~33%-kal nagyobb lenne, és minden hívó saját
+kódolást írna rá. A **válasz** minden ágon a szokásos `{ ok, data }` boríték, a
+rendelés teljes, frissített csatolmány-listájával (`201`).
+
+Korlátok: csak **PDF** (a `%PDF-` aláírást a szerver a tartalmon ellenőrzi, nem
+a bejelentett típuson), rendelésenként legfeljebb **5 fájl**, fájlonként
+**8 MB**, együtt **16 MB**. A korlátok a már feltöltött fájlokkal együtt
+értendők. Saját, szűkebb korlát: **10 feltöltés / perc**.
+
+Csak addig fogad fájlt, amíg a csomag el nem indult: fizikai szállítást igénylő
+rendelés, és még nincs GLS-címke igényelve. Egyébként `409`
+`order_not_attachable`.
+
+Törlés az API-n nincs: a feltöltött fájlt a fiókodban, a rendelés oldalán
+tudod törölni a feladásig.
 
 ### `GET /api/v1/orders/{id}/keys` - scope: `read`
 

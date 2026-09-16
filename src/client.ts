@@ -89,12 +89,27 @@ export interface OrderRequestInput {
   taxNumber?: string;
   /** Sajat belso azonosito; rakerul a bizonylatok megjegyzes rovatara. */
   internalReference?: string;
+  dropshipping?: boolean;
   cardId?: string;
 }
 
 export interface KeyproClientOptions {
   apiBase: string;
   apiKey?: string | null;
+}
+
+export interface OrderAttachment {
+  id: number;
+  filename: string;
+  sizeBytes: number;
+  mimeType: string;
+  createdAt: string;
+  /** Bejelentkezett (bongeszos) letoltesi ut; API kulccsal NEM hivhato. */
+  downloadPath: string;
+}
+
+export interface OrderAttachmentsResponse {
+  attachments: OrderAttachment[];
 }
 
 export class KeyproClient {
@@ -147,6 +162,66 @@ export class KeyproClient {
     if (envelope.ok === true && envelope.data !== undefined) {
       return envelope.data;
     }
+    const error = envelope.error ?? {};
+    throw new KeyproApiError(
+      response.status,
+      error.code ?? "unknown_error",
+      error.message ?? `Ismeretlen hiba (HTTP ${response.status}).`,
+      error.details,
+    );
+  }
+
+  /**
+   * MULTIPART feltoltes. Sajat ut, mert a `request` JSON-t kuld, es ez az
+   * EGYETLEN vegpont, aminek a KERESE nem JSON: base64-ben a bajtok ~33%-kal
+   * nagyobbak lennenek, es MCP-n at a fajl TARTALMA a modell kontextusaba
+   * kerulne. A `content-type` fejlecet SZANDEKOSAN nem allitjuk be: a `fetch` a
+   * `FormData`-bol maga generalja a `boundary`-t, es egy kezzel irt fejlec
+   * elrontana - a szerver nem tudna szetszedni a torzset.
+   *
+   * A valasz a szokasos `{ ok, data }` boritek, tehat a hiba-ag azonos a
+   * `request`-evel.
+   */
+  private async requestMultipart<T>(
+    method: string,
+    path: string,
+    form: FormData,
+  ): Promise<T> {
+    const headers: Record<string, string> = { accept: "application/json" };
+    if (this.opts.apiKey) headers.authorization = `Bearer ${this.opts.apiKey}`;
+
+    let response: Response;
+    try {
+      response = await fetch(`${this.opts.apiBase}${path}`, {
+        method,
+        headers,
+        body: form,
+      });
+    } catch (err) {
+      throw new KeyproApiError(
+        0,
+        "network_error",
+        `Nem sikerült elérni a szervert (${this.opts.apiBase}): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new KeyproApiError(
+        response.status,
+        "invalid_response",
+        `A szerver nem JSON választ adott (HTTP ${response.status}). Jó az api-base beállítás?`,
+      );
+    }
+
+    const envelope = payload as {
+      ok?: boolean;
+      data?: T;
+      error?: { code?: string; message?: string; details?: unknown };
+    };
+    if (envelope.ok === true && envelope.data !== undefined) return envelope.data;
     const error = envelope.error ?? {};
     throw new KeyproApiError(
       response.status,
@@ -360,6 +435,52 @@ export class KeyproClient {
       }>;
       licenses: Array<Record<string, unknown>>;
     }>("GET", `/api/v1/orders/${id}/keys`);
+  }
+
+  /** DROPSHIPPING be-/kikapcsolasa (a GLS-cimke igenyleseig). */
+  orderSetDropshipping(orderId: number, dropshipping: boolean) {
+    return this.request<{
+      orderId: number;
+      dropshipping: boolean;
+      changed: boolean;
+    }>("POST", `/api/v1/orders/${orderId}/dropshipping`, { dropshipping });
+  }
+
+  /** A rendeleshez feltoltott fajlok listaja. */
+  orderAttachments(orderId: number) {
+    return this.request<OrderAttachmentsResponse>(
+      "GET",
+      `/api/v1/orders/${orderId}/attachments`,
+    );
+  }
+
+  /**
+   * Fajl(ok) feltoltese a rendeleshez. A hivo BAJTOKAT ad at, nem utvonalat: a
+   * fajl beolvasasa a hivo dolga (a CLI es az MCP szerver is HELYBEN fut, tehat
+   * lemezrol olvas) - igy a tartalom sosem utazik at a modellen.
+   */
+  orderAttachmentUpload(
+    orderId: number,
+    /**
+     * A `Uint8Array<ArrayBuffer>` SZUKITES szandekos: a sima `Uint8Array`
+     * `SharedArrayBuffer`-rel is hatterezheto, azt pedig a `Blob` nem fogadja
+     * el. A hivo `new Uint8Array(readFileSync(path))`-sal pont ilyet ad.
+     */
+    files: readonly { filename: string; bytes: Uint8Array<ArrayBuffer> }[],
+  ) {
+    const form = new FormData();
+    for (const file of files) {
+      form.append(
+        "attachments",
+        new Blob([file.bytes], { type: "application/pdf" }),
+        file.filename,
+      );
+    }
+    return this.requestMultipart<OrderAttachmentsResponse>(
+      "POST",
+      `/api/v1/orders/${orderId}/attachments`,
+      form,
+    );
   }
 
   orderCancel(id: number) {

@@ -6,9 +6,15 @@
  * modul nem huzza be a stdio transportot a webes buildbe.
  */
 
+import { readFileSync } from "node:fs";
+import { basename } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { KeyproApiError, type KeyproClient } from "./client.js";
+import {
+  DROPSHIPPING_MEANING,
+  dropshippingRefusalSentence,
+} from "./dropshipping-contract.js";
 import { priceContract } from "./price-contract.js";
 
 // A webes tavoli MCP route (@keypro/cli/mcp-tools) innen kapja a klienst is,
@@ -23,7 +29,7 @@ export type { KeyproClient, KeyproClientOptions } from "./client.js";
  * (korabban a web 0.1.4-en ragadt). Kiadaskor a package.json-nal egyutt ez az
  * egy konstans valtozik.
  */
-export const KEYPRO_MCP_VERSION = "0.1.16";
+export const KEYPRO_MCP_VERSION = "0.1.17";
 
 /**
  * A szerver `instructions` mezoje (MCP initialize). A kliens modellje ezt latja
@@ -111,7 +117,15 @@ const orderRequestShape = {
     "Per-field billing address overrides (defaults come from the user profile)",
   ),
   shipping: addressShape.describe(
-    "Separate shipping address (omit to ship to the billing address)",
+    "Separate shipping address (omit to ship to the billing address). A key " +
+      "you leave out is filled from your saved profile shipping address - " +
+      "EXCEPT with dropshipping=true, where this block is your END CUSTOMER " +
+      "and a missing key stays missing (lastName, address1, city, postcode, " +
+      "country are required, otherwise validation_failed 400 naming them in " +
+      "details.missing). With dropshipping=true email is stored on the order " +
+      "(empty is fine, a malformed one is validation_failed 400) and counts " +
+      "as the recipient's contact just like phone; on a normal order email is " +
+      "ignored (GLS notifies your billing e-mail).",
   ),
   taxNumber: z.string().optional(),
   internalReference: z
@@ -126,6 +140,19 @@ const orderRequestShape = {
       // `internal-reference.test.ts` SZO SZERINT az egyezoseget. Ha ezt a
       // mondatot atirod, a teszt PIROS lesz, es a forras a tabla, nem ez a sor.
       "Your own internal reference / PO number for this order, printed verbatim. It is printed in the comment field of the FINANCIAL documents (proforma, prepayment invoice, final invoice, invoice, correction, storno) and never on the delivery note; a KEP-balance (wallet) order gets no financial document at all, so on such an order the reference is printed on nothing.",
+    ),
+  dropshipping: z
+    .boolean()
+    .optional()
+    // A MONDAT GENERALT (`dropshipping-contract.ts`), nem kezzel irt: a kezzel
+    // irt valtozat a `combine_free` ag bevezetese utan TEVES maradt, es a
+    // `dropshipping_requires_own_parcel` kodot meg sem emlitette.
+    .describe(
+      `true = ${DROPSHIPPING_MEANING} It needs an order with a parcel of ` +
+        `its OWN (gls_hd or gls_parcelshop). ` +
+        `${dropshippingRefusalSentence("order")} ` +
+        "Can still be changed afterwards with keypro_order_set_dropshipping, " +
+        "until the GLS label is requested.",
     ),
   cardId: z
     .string()
@@ -309,6 +336,75 @@ export function registerKeyproTools(server: McpServer, client: KeyproClient): vo
   );
 
   server.registerTool(
+    "keypro_order_set_dropshipping",
+    {
+      title: "Turn dropshipping on/off for an order",
+      // A "mikor utasitjuk el" mondat GENERALT (`dropshipping-contract.ts`):
+      // kezzel irva itt is elavult, amint uj kapu keletkezett.
+      description:
+        `Switch DROPSHIPPING on or off for one of YOUR orders. With ` +
+        `dropshipping=true ${DROPSHIPPING_MEANING} Switching it ON needs an ` +
+        `order whose parcel is still open and carries nothing else. ` +
+        `${dropshippingRefusalSentence("toggle")} ` +
+        "Switching it OFF is always allowed while the parcel is open - that " +
+        "is the safe direction. Whether the parcel is still open is a FACT " +
+        "check, not a status check: an admin can set prepared-shipping by hand " +
+        "with no label, and then the box is still open; but once the label is " +
+        "requested the SENDER NAME is already decided, so a later switch would " +
+        "be a lie. Every change is recorded as an internal order note naming " +
+        "the actor.",
+      inputSchema: {
+        orderId: z.number().int().positive(),
+        dropshipping: z.boolean(),
+      },
+      annotations: writeHints({ destructive: false, idempotent: true }),
+    },
+    (args) =>
+      run(() => client.orderSetDropshipping(args.orderId, args.dropshipping)),
+  );
+
+  server.registerTool(
+    "keypro_order_attachments",
+    {
+      title: "Files attached to an order",
+      description:
+        "List the files uploaded to one order (today: the partner's own invoice, which we print into the parcel on a dropshipping shipment). downloadPath is a logged-in browser path and is NOT callable with an API key - the file holds the end customer's data.",
+      inputSchema: { orderId: z.number().int().positive() },
+      annotations: READ_ONLY,
+    },
+    (args) => run(() => client.orderAttachments(args.orderId)),
+  );
+
+  server.registerTool(
+    "keypro_order_attach_file",
+    {
+      title: "Attach your own invoice (PDF) to an order",
+      description:
+        "Upload the partner's OWN invoice - the one issued to the end customer - to an order. On a dropshipping shipment we print it and put it in the parcel; we never read or process its contents. PASS A LOCAL FILE PATH, never the file content: this server runs on the user's machine and reads the file from disk itself, so the bytes never enter the conversation. PDF only (the server checks the %PDF- signature on the content, not the declared type), at most 5 files per order, 8 MB each, 16 MB together, 10 uploads per minute. Only accepted while the parcel has not left: a physical shipment with no GLS label requested yet, otherwise order_not_attachable (409).",
+      inputSchema: {
+        orderId: z.number().int().positive(),
+        paths: z
+          .array(z.string().min(1))
+          .min(1)
+          .describe(
+            "Local paths of the PDF files on THIS machine. Never the file content.",
+          ),
+      },
+      annotations: writeHints({ destructive: false, idempotent: false }),
+    },
+    (args) =>
+      run(() =>
+        client.orderAttachmentUpload(
+          args.orderId,
+          args.paths.map((path) => ({
+            filename: basename(path),
+            bytes: new Uint8Array(readFileSync(path)),
+          })),
+        ),
+      ),
+  );
+
+  server.registerTool(
     "keypro_order_cancel",
     {
       title: "Cancel an order",
@@ -325,7 +421,11 @@ export function registerKeyproTools(server: McpServer, client: KeyproClient): vo
     {
       title: "Preview a payment change",
       description:
-        "Preview changing an UNPAID order's payment method (only on-hold=bacs / pending=stripe orders qualify). Returns the recomputed totals for the new method (cheque and cod add a fee, bacs/wallet/stripe add none) and a confirmToken. Read every fee from newTotals/fees, never compute it: the cheque fee is +5% on most accounts and waived on a few by agreement. cheque and internal are account-gated - an account without permission is refused with payment_method_not_allowed (HTTP 403) already here. ALWAYS show the new totals to the user, then call keypro_order_change_payment.",
+        "Preview changing an UNPAID order's payment method (only on-hold=bacs / pending=stripe orders qualify). Returns the recomputed totals for the new method (cheque and cod add a fee, bacs/wallet/stripe add none) and a confirmToken. Read every fee from newTotals/fees, never compute it: the cheque fee is +5% on most accounts and waived on a few by agreement. cheque and internal are account-gated - an account without permission is refused with payment_method_not_allowed (HTTP 403) already here. ALWAYS show the new totals to the user, then call keypro_order_change_payment. " +
+        // A mondat GENERALT (`dropshipping-contract.ts`), UGYANAZ, mint a
+        // megerosites leirasan: az elonezet 2026-09-16 ota ugyanazzal a koddal
+        // es statusszal utasit el, tehat a ket leiras nem mondhat mast.
+        `Refused here already, before any confirmToken is issued: ${dropshippingRefusalSentence("payment")}`,
       inputSchema: {
         orderId: z.number().int().positive(),
         newMethod: z.enum(["bacs", "cheque", "cod", "wallet", "stripe", "internal"]),
@@ -341,7 +441,12 @@ export function registerKeyproTools(server: McpServer, client: KeyproClient): vo
       title: "Change payment method",
       annotations: writeHints({ destructive: true, idempotent: false }),
       description:
-        "Change an UNPAID order's payment method. Requires the confirmToken from keypro_order_change_payment_preview. wallet debits the KEP balance now and fulfils, and raises NO invoice for the order (the balance was already invoiced when it was topped up; the only document is the delivery note at fulfilment); cheque/cod add their fee and fulfil (invoice + keys where due), and cheque is account-gated (payment_method_not_allowed, HTTP 403, without permission); bacs issues a proforma (awaits transfer); stripe charges the saved card or returns a payment link in payment.paymentUrl. Pass cardId (pm_...) to pick a specific card for stripe.",
+        "Change an UNPAID order's payment method. Requires the confirmToken from keypro_order_change_payment_preview. wallet debits the KEP balance now and fulfils, and raises NO invoice for the order (the balance was already invoiced when it was topped up; the only document is the delivery note at fulfilment); cheque/cod add their fee and fulfil (invoice + keys where due), and cheque is account-gated (payment_method_not_allowed, HTTP 403, without permission); bacs issues a proforma (awaits transfer); stripe charges the saved card or returns a payment link in payment.paymentUrl. Pass cardId (pm_...) to pick a specific card for stripe. " +
+        // A mondat GENERALT (`dropshipping-contract.ts`): a cod-tiltas MASIK
+        // iranya (egy mar dropshipping rendelest allitanank cod-ra) ezen a
+        // vegponton keletkezik, es kezzel irva pont ugy avulna el, mint a
+        // rendelesfelvetel mondata avult el a `combine_free` ag bevezetesekor.
+        `${dropshippingRefusalSentence("payment")}`,
       inputSchema: {
         orderId: z.number().int().positive(),
         newMethod: z.enum(["bacs", "cheque", "cod", "wallet", "stripe", "internal"]),

@@ -6,7 +6,8 @@
  */
 
 import { createInterface } from "node:readline/promises";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import { basename } from "node:path";
 import { randomUUID } from "node:crypto";
 import { Command } from "commander";
 import {
@@ -503,6 +504,14 @@ function addOrderOptions(cmd: Command): Command {
       "--internal-reference <azonosito>",
       "sajat belso azonosito (rakerul a bizonylatok megjegyzes rovatara)",
     )
+    // DROPSHIPPING: a CLI es az MCP ut ugyanazt a mezot kuldi. A kapcsolo
+    // nelkul a `buildOrderRequest` nem toltotte ki a mezot, tehat a CLI-bol
+    // egyaltalan nem lehetett dropshipping rendelest leadni - kozben a
+    // CHANGELOG hirdette. A ket felulet nem terhet el.
+    .option(
+      "--dropshipping",
+      "a csomagot a vegfelhasznalodnak adjuk fel, a TE nevedben (csak sajat kuldemennyel: gls_hd / gls_parcelshop)",
+    )
     .option("--card <pm_id>", "mentett kartya azonosito (card fizetesnel)");
   for (const [flag, ] of ADDRESS_FLAG_FIELDS) {
     cmd.option(`--billing-${flag} <ertek>`);
@@ -581,6 +590,10 @@ function buildOrderRequest(opts: Record<string, unknown>): OrderRequestInput {
     shipping: address("shipping"),
     taxNumber: opts.taxNumber as string | undefined,
     internalReference: opts.internalReference as string | undefined,
+    // Csak bekapcsolva utazik: a `false` es a "nem mondtam rola semmit"
+    // ugyanaz a szerver oldali alapertelmezes, es egy explicit `false` csak
+    // zajt vinne az elonezet-torzsbe.
+    dropshipping: opts.dropshipping === true ? true : undefined,
     cardId: opts.card as string | undefined,
   };
 }
@@ -890,6 +903,90 @@ order
 // ---------------------------------------------------------------------------
 // Termekkulcsok
 // ---------------------------------------------------------------------------
+
+/**
+ * RENDELES-CSATOLMANY: a partner sajat, vegfelhasznalojanak kiallitott szamlaja,
+ * amit dropshipping-kuldemenynel a csomagba nyomtatunk.
+ *
+ * A fajlt a CLI olvassa be LEMEZROL es multipartkent kuldi - sem a parancssoron,
+ * sem (MCP-n at) a modellen nem utazik at a tartalom.
+ */
+order
+  .command("dropshipping")
+  .description("dropshipping be- vagy kikapcsolasa egy rendelesen (feladasig)")
+  .argument("<rendelesId>", "a rendeles azonositoja")
+  .option("--off", "kikapcsolas (alapertelmezes: bekapcsolas)")
+  .action(async (orderId: string, opts: { off?: boolean }, cmd: Command) => {
+    try {
+      const client = clientFor(cmd);
+      const result = await client.orderSetDropshipping(
+        Number(orderId),
+        opts.off !== true,
+      );
+      output(result, () => {
+        process.stdout.write(
+          result.dropshipping
+            ? "Dropshipping BEKAPCSOLVA: a csomag a te nevedben megy a vevodnek.\n"
+            : "Dropshipping kikapcsolva.\n",
+        );
+      });
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+order
+  .command("attachments")
+  .description("a rendeleshez feltoltott fajlok listaja")
+  .argument("<rendelesId>", "a rendeles azonositoja")
+  .action(async (orderId: string, _opts: unknown, cmd: Command) => {
+    try {
+      const client = clientFor(cmd);
+      const result = await client.orderAttachments(Number(orderId));
+      output(result, () => {
+        if (result.attachments.length === 0) {
+          process.stdout.write("Ehhez a rendeléshez nincs feltöltött fájl.\n");
+          return;
+        }
+        printTable(
+          ["id", "fájl", "méret", "feltöltve"],
+          result.attachments.map((a) => [
+            String(a.id),
+            a.filename,
+            `${Math.round(a.sizeBytes / 1024)} kB`,
+            a.createdAt.slice(0, 10),
+          ]),
+        );
+      });
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+order
+  .command("attach")
+  .description("sajat szamla (PDF) feltoltese a rendeleshez")
+  .argument("<rendelesId>", "a rendeles azonositoja")
+  .argument("<fajl...>", "egy vagy tobb helyi PDF utvonala")
+  .action(async (orderId: string, paths: string[], _opts: unknown, cmd: Command) => {
+    try {
+      const files = paths.map((path) => ({
+        filename: basename(path),
+        bytes: new Uint8Array(readFileSync(path)),
+      }));
+      const client = clientFor(cmd);
+      const result = await client.orderAttachmentUpload(Number(orderId), files);
+      output(result, () => {
+        process.stdout.write(
+          `Feltöltve. A rendeléshez most ${result.attachments.length} fájl tartozik.\n`,
+        );
+      });
+    } catch (err) {
+      // A hianyzo/olvashatatlan fajl a leggyakoribb hiba, es a nyers ENOENT
+      // hasznalhatatlan - a `fail` amugy is formaz, de a fajlnev kell bele.
+      fail(err);
+    }
+  });
 
 const keysCmd = program.command("keys").description("termékkulcsok");
 

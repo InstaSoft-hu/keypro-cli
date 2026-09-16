@@ -21,6 +21,126 @@ Frissítés: `npm i -g @keypro/cli`. A telepített verzió: `keypro --version`.
 
 ---
 
+## 0.1.17 - 2026-09-16
+
+### Rendelés-csatolmány: a saját számlád a csomagba
+
+**NEM TÖRŐ**: két új végpont, meglévő mező vagy viselkedés nem változik.
+
+Dropshipping küldeménynél (a csomagot a te vevődnek adjuk fel, a te nevedben)
+feltöltheted a **saját, a végfelhasználódnak kiállított számládat** - kinyomtatjuk
+és a csomagba tesszük. A fájl tartalmát nem ellenőrizzük és nem dolgozzuk fel.
+
+- `POST /orders/{id}/attachments` (scope: `orders:write`) - **ennek a kérése
+  `multipart/form-data`, nem JSON** (a boríték bájtokat nem tud vinni). A fájl
+  az `attachments` mezőben, egy kérésben több is. A válasz a szokásos boríték.
+- `GET /orders/{id}/attachments` (scope: `read`) - a feltöltött fájlok listája.
+
+Korlátok: csak PDF (a szerver a **tartalmon** ellenőrzi az aláírást, nem a
+bejelentett típuson), rendelésenként 5 fájl, fájlonként 8 MB, együtt 16 MB, és
+10 feltöltés / perc. Csak addig fogad fájlt, amíg a csomag el nem indult;
+egyébként `409` `order_not_attachable`.
+
+Két új hibakód: `order_not_attachable` (409) és `attachment_rejected` (400).
+Törlés az API-n nincs - a feltöltött fájlt a fiókodban, a rendelés oldalán
+törölheted (akkor is, ha a csomag már elment).
+
+CLI: `keypro order attach <rendelesId> <fajl...>` és
+`keypro order attachments <rendelesId>`.
+
+MCP: `keypro_order_attach_file` és `keypro_order_attachments`. A feltöltő eszköz
+**helyi fájl-útvonalat vesz át, nem fájltartalmat**: az MCP szerver a te gépeden
+fut és maga olvassa be a fájlt, így a PDF bájtjai soha nem kerülnek bele a
+beszélgetésbe (egy 8 MB-os PDF base64-ben több millió token lenne).
+
+### Dropshipping: a csomag a te nevedben, a te vevődnek
+
+**NEM TÖRŐ**: új, opcionális mező és egy új végpont.
+
+A rendelés-kérés új mezője a **`dropshipping`** (logikai, alap `false`). Ha
+bekapcsolod, a csomagot a **te végfelhasználódnak** adjuk fel, **a te nevedben**:
+a címkén a te neved és címed lesz a feladó, és sem a küldeményen, sem a dobozban
+nem lesz KeyPro-felirat. A dobozba a te átruházási dokumentumaid kerülnek, és ha
+feltöltötted, a saját számlád is.
+
+Csak olyan rendelésen választható, amelynek **saját küldeménye** van, tehát
+`gls_hd` vagy `gls_parcelshop` szállítási móddal. Tisztán digitális rendelésen
+`400` `dropshipping_requires_shipping`, összecsomagolt (`combine_free`)
+rendelésen `400` `dropshipping_requires_own_parcel` - annak nincs saját
+küldeménye, az áru a szülő rendelés csomagjában utazik.
+
+Utólag is átállítható a **GLS-címke igényléséig**:
+`POST /orders/{id}/dropshipping`. Utána `409` `dropshipping_locked` - akkor a
+feladó neve már eldőlt. Az aktuális érték a `GET /orders/{id}` válaszának új
+`dropshipping` mezőjéből olvasható vissza.
+
+Az utólagos bekapcsolásnak **harmadik** feltétele is van: ha ebben a csomagban
+már utazik egy hozzácsomagolt (`combine_free`) rendelés, a válasz `409`
+`dropshipping_has_combined_orders`, és az `error.details.combinedChildren`
+megnevezi őket. Az abban lévő áru a te saját rendelésed, tehát a
+végfelhasználódhoz menne ki. Előbb annak kell külön küldeményt választani.
+
+Az utólagos átállítás elutasításai a KONKRÉT hiányt nevezik meg: tisztán
+digitális rendelésen `dropshipping_requires_shipping`, összecsomagoltan
+`dropshipping_requires_own_parcel` (eddig mindkettő az utóbbit adta).
+
+**A feladás feltétele a végfelhasználó adata**, és azt pontosan abban a
+formában kérjük, ahogy a címke használja: **vezeték- ÉS keresztnév** (a cégnév
+nem kerül a címkére), valamint **telefonszám vagy e-mail cím** - ez utóbbi
+mostantól házhozszállításnál is, nem csak csomagpontnál, mert a futár azon hívja
+a címzettet. Kell továbbá a végfelhasználó **címe** (irányítószám, város,
+utca/házszám) - **csomagpontos küldeménynél is**, mert a GLS a címzett címét ott
+is megköveteli; a csomag ettől még a csomagpontra megy. A rendelés leadását egy
+hiány nem akadályozza, csak a feladást; hiány esetén emlékeztető e-mailt küldünk.
+
+A végfelhasználó adatai a kérés `shipping` blokkjában mennek, ami csomagpontos
+rendelésen is elfogadott. Két szabály ehhez a blokkhoz:
+
+- **Dropshippingnél a kihagyott kulcsot NEM töltjük ki a fiókod mentett
+  szállítási adataiból.** Normál rendelésen a `shipping` blokk továbbra is
+  mezőnkénti felüldefiniálás a profilod fölött; dropshippingnél viszont a blokk
+  a végfelhasználód adatait hordozza, ezért egy kihagyott kulcs hiány marad -
+  különben a címzett helyére a te saját neved vagy telefonszámod kerülne. A
+  `lastName`, `address1`, `city`, `postcode` és `country` hiánya így `400`
+  `validation_failed` (a `details.missing` megnevezi), a `firstName` és az
+  elérhetőség hiánya a rendelést nem, csak a feladást állítja meg. Ha a
+  végfelhasználó adatait rendeléskor még nem tudod, a `shipping` blokkot hagyd
+  el egészen: a rendelés leadható, a feladás megáll, és emlékeztetőt küldünk.
+  Ajánlás: küldd el mindig az összes címzett-mezőt (`lastName`, `firstName`,
+  `phone` vagy `email`, `address1`, `city`, `postcode`, `country`), akkor a
+  feladás sem akad el. A `POST /orders/preview` `shippingAddress` mezője
+  pontosan azt mutatja, ami a rendelésre kerül.
+- **Dropshipping rendelésen a `shipping.email` a rendelésre kerül.** A GLS ezen
+  értesíti a címzettet, és az elérhetőség feltételét telefonszám nélkül is
+  teljesíti. Nem kötelező (üresen is mehet), de érvénytelen formátumban `400`
+  `validation_failed` (`details.invalid: ["shipping.email"]`). Normál rendelésen
+  a mezőt továbbra sem mentjük és nem is ellenőrizzük: ott a GLS-értesítő a
+  számlázási e-mail címedre megy.
+
+Ez a két szabály NEM TÖRŐ: egy NEM dropshipping hívás viselkedése semmiben nem
+változik, a dropshipping mező pedig maga is ebben a verzióban jelenik meg, tehát
+kiadott kliens eddig nem küldhette.
+
+**Utánvét és dropshipping soha nem együtt.** Egy dropshipping csomagon a futár a
+rendelés végösszegét - a te beszerzési áradat - a végfelhasználódtól szedné be, a
+bolt számlájára. Új hibakód: `dropshipping_excludes_cod`, mindkét irányban:
+`400` a rendelésfelvételen (`paymentMethod: "cod"` + `dropshipping: true`) és egy
+dropshipping rendelés `cod`-ra váltásakor (`POST /orders/{id}/payment`), `409`
+egy `cod` rendelés utólagos dropshippingre állításakor.
+A fizetésimód-váltás **előnézete** (`POST /orders/{id}/payment/preview`) már
+ugyanígy elutasít (`400` `dropshipping_excludes_cod`, ugyanazzal a mondattal),
+tehát erre a váltásra `confirmToken`-t sem kapsz.
+**Figyelmet igényel:** a `POST /orders/{id}/payment` és az előnézete ettől egy
+MEGLÉVŐ végponton ad új hibakódot - de csak dropshipping rendelésen, tehát egy
+eddig működő hívást nem ront el.
+
+CLI: `keypro order create --dropshipping ...` (és ugyanez az
+`order preview`-n), illetve `keypro order dropshipping <rendelesId> [--off]`.
+MCP: `keypro_order_set_dropshipping`, és a `dropshipping` mező a
+`keypro_order_preview` / `keypro_order_create` sémájában.
+
+---
+
 ## 0.1.16 - 2026-09-15
 
 ### A 8 napos fizetési határidő (`cheque`) fiókhoz kötött lett
