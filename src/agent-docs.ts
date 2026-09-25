@@ -331,8 +331,9 @@ over the API:
   exists. \`keyValue\` may be \`null\` when the licence service is unreachable;
   the counts stay correct and a \`null\` is never a placeholder.
 - \`GET /license-documents\` lists the issued documents (summary rows: end
-  customer name, products, quantities, dates). It deliberately carries NO
-  product keys - that is a payload-size choice, not confidentiality.
+  customer name, products, quantities, dates, and your own
+  \`partnerReference\`). It deliberately carries NO product keys - that is a
+  payload-size choice, not confidentiality.
 - \`GET /license-documents/{id}\` is the full snapshot: the end customer's data
   and \`items[].keys[]\` with the FULL, unmasked \`keyValue\`. Those come from
   the stored snapshot, never re-resolved, so an issued document never moves.
@@ -346,9 +347,23 @@ over the API:
   return it as \`licenseNature\` on the product AND on every variant row.
 - \`POST /license-documents\` (scope \`licenses:write\`) ISSUES one. Body:
   \`customer\` (\`name\` required), \`items[]\` of \`{ productId, qty }\`, optional
-  \`includeKeys\`. Key selection is AUTOMATIC FIFO only - there is no \`keyIds\`
-  field. HTTP 201 on success, and \`data.document\` is byte-for-byte the shape
-  \`GET /license-documents/{id}\` returns.
+  \`includeKeys\`, optional \`partnerReference\`. Key selection is AUTOMATIC
+  FIFO only - there is no \`keyIds\` field. HTTP 201 on success, and
+  \`data.document\` is byte-for-byte the shape \`GET /license-documents/{id}\`
+  returns.
+- \`partnerReference\` is YOUR OWN identifier (usually your own order number).
+  It is PRINTED ON THE ISSUED PDF, so it is frozen at issue time: a typo is
+  fixed by revoking and re-issuing, never by an edit. It is optional, NOT
+  unique, identifies nothing and orders nothing. The character set is narrow on
+  purpose - English letters, the Hungarian and Central European accented Latin
+  letters, digits, space and \`- _ . / #\`, at most 63 characters; NOT every
+  Latin letter (Vietnamese accents, say, are refused) - the PDF's font would
+  SILENTLY draw something else for a glyph it does not have, and a narrow set
+  can be widened later but never narrowed, so the set stays NARROWER than the
+  font (\`&\`, \`+\` and \`:\` are drawable and still refused). Anything outside
+  the set is a \`validation_failed\` (400) naming the offending character;
+  nothing is ever truncated. Field-level details are in
+  the \`API.md\` shipped in this package.
 - The \`Idempotency-Key\` header is MANDATORY here (8-100 chars), unlike on
   \`POST /orders\` where it is optional: a retry without one would allocate
   DIFFERENT keys under FIFO, so the end customer would end up with two documents

@@ -1131,6 +1131,12 @@ licdocCmd
           ["Állapot", document.revokedAt ? "visszavont" : "élő"],
           ["Kiállítva", String(document.createdAt).slice(0, 10)],
           ["Visszavonva", document.revokedAt ? String(document.revokedAt).slice(0, 10) : null],
+          // A SAJAT hivatkozasod. A `printKV` a `null`-t kihagyja, tehat a
+          // hivatkozas nelkul kiallitott iratokon nincs ures sor.
+          [
+            "Saját hivatkozás",
+            document.partnerReference as string | null,
+          ],
           ["Végfelhasználó", customer.name],
           ["Adószám", customer.taxNumber],
           ["Cím", [customer.postcode, customer.city, customer.addressLine].filter(Boolean).join(" ") || null],

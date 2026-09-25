@@ -1072,6 +1072,42 @@ Miért így: 2026-08-19-ig egyetlen NÉVMINTA döntötte el, mi számít haszná
 licencnek, ezért előfizetésre is használt-licenc átruházási igazolás készült -
 olyan szolgáltatásra, amit átruházni nem lehet.
 
+#### `partnerReference`: a TE azonosítód az iraton
+
+A dokumentumra ráírhatod a **saját hivatkozásodat** - jellemzően a saját
+rendelésszámodat -, hogy később tudd, melyik iratot melyik rendelésedhez
+készítetted. Opcionális: ha nem küldöd, `null`.
+
+**Rákerül a kiállított PDF-re is**, a fejlécbe, `Kiállítói hivatkozás:`
+felirattal - tehát a végfelhasználód is látja. Ezért a **kiállításkor rögzül**:
+utólag nem módosítható, elgépelésnél a dokumentumot vissza kell vonni és újat
+kiállítani (új sorszámmal).
+
+Korlátok, és mind a kettő **hiba**, nem csonkítás:
+
+- legfeljebb **63 karakter**;
+- csak az **angol ábécé betűi**, a magyar és a közép-európai **ékezetes betűk**,
+  a **számjegyek**, a **szóköz** és a `-` `_` `.` `/` `#` jelek. Ami ezen kívül
+  esik - emoji, nyíl, kínai vagy arab írásjel, gondolatjel, tipográfiai
+  idézőjel, tabulátor, de a távolabbi latin betűk is, például a vietnami
+  ékezetesek -, az `validation_failed` (400), és a hibaüzenet MEGNEVEZI a
+  kifogásolt karaktert a kódpontjával együtt.
+
+A szűkítés oka a PDF, két irányból is. A dokumentum betűkészlete nem tartalmaz
+minden Unicode jelet, és a PDF-generátor egy hiányzó jel helyére **némán mást
+rajzol**. A hivatkozás ezen felül lehet egyetlen, szóköz nélküli szó, amit a
+tördelő nem tör el: ami a sornál szélesebb, az **némán levágódik** - ezért a 63
+karakter mért határ, nem kerek szám: a leghosszabb megengedett érték a
+legszélesebb engedett jelből még éppen elfér a papíron. Egy jogi iraton
+mindkét néma hiba rosszabb, mint az elutasítás, ezért inkább visszautasítunk
+egy egzotikus rendelésszámot.
+
+A mező **nem egyedi**: ugyanaz az érték több dokumentumon is állhat (egy
+rendelésedből több végfelhasználónak is állíthatsz ki iratot). Nem lehet vele
+dokumentumot azonosítani, és nem rendez semmit; a listán a `GET` válasz mezője,
+a webes felületen a keresőmező illeszt rá. Kiállítás előtt készült, régebbi
+dokumentumokon `null`.
+
 #### `includeKeys`: mit kapcsol, és mit NEM
 
 Két külön dolog visel hasonló nevet:
@@ -1120,7 +1156,8 @@ alapértelmezés `live`), `limit`, `offset`.
 `data`: `limit`, `offset`, `total`, `documents[]`. Egy sor: `id`,
 `documentNumber`, `orderId` (az elsődleges forrás-rendelés), `status`
 (`live` | `revoked`), `customerName`, `totalQty`, `licenseNature`
-(`used` | `new` | `subscription`), `items[]`
+(`used` | `new` | `subscription`), `partnerReference` (a SAJÁT hivatkozásod
+vagy `null`, lásd fent), `items[]`
 (`productId`, `productName`, `qty`), `createdAt`, `revokedAt`.
 
 Az `orderId` szűrő ugyanazt a szabályt használja, mint a `GET /orders/{id}`
@@ -1154,7 +1191,8 @@ Törzs:
     "contact": "Kovács Anna"
   },
   "items": [{ "productId": 29, "qty": 3 }],
-  "includeKeys": true
+  "includeKeys": true,
+  "partnerReference": "MEG-2026/0042"
 }
 ```
 
@@ -1166,6 +1204,11 @@ Törzs:
 - `includeKeys` opcionális: szerepeljen-e a termékkulcs a kiállított PDF-en.
   Ha **hiányzik**, a fiókod beállítása dönt; egy explicit `false` felülírja azt.
   (A JSON válasz a kulcsokat mindig viszi, ettől függetlenül.)
+- `partnerReference` opcionális: a saját hivatkozásod (pl. a rendelésszámod),
+  legfeljebb 63 karakter, és csak angol vagy közép-európai ékezetes betű /
+  számjegy / szóköz / `-` `_` `.` `/` `#`.
+  **Rákerül a kiállított PDF-re**, és utólag nem módosítható. Részletek:
+  `partnerReference`: a TE azonosítód az iraton.
 
 **A kulcsválasztás CSAK automatikus FIFO**, és nincs rá kapcsoló: a rendszer a
 legrégebbi rendelésedből származó szabad kulcsokat foglalja. A kérésben
@@ -1229,7 +1272,8 @@ mennyi maradt - új kéréssel, kevesebb darabszámmal próbálkozz.
 
 Egy kiállított dokumentum TELJES pillanatképe.
 
-`data`: `{ document }`, a lista mezőin túl: `includeKeys`, `customer`
+`data`: `{ document }`, a lista mezőin túl (a `partnerReference` a listán is
+ott van): `includeKeys`, `customer`
 (`name`, `taxNumber`, `postcode`, `city`, `addressLine`, `contact` - a
 végfelhasználó adatai a kiállítás pillanatában, hiányzó mező `null`),
 `items[]` a `keys[]` tömbbel (`keyId`, `keyValue`, `qty`, `orderId`,

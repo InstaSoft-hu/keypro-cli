@@ -21,6 +21,47 @@ Frissítés: `npm i -g @keypro/cli`. A telepített verzió: `keypro --version`.
 
 ---
 
+## 0.1.18 - 2026-09-24
+
+### Licenc-dokumentum: a SAJÁT hivatkozásod az iraton
+
+**NEM TÖRŐ**: egy új, opcionális kérés-mező és egy új válasz-mező. Meglévő hívás
+változatlanul működik, a korábban kiállított dokumentumokon az érték `null`.
+
+A `POST /license-documents` új, opcionális mezője a **`partnerReference`**: a
+saját hivatkozásod (jellemzően a saját rendelésszámod), hogy később tudd, melyik
+iratot melyik rendelésedhez készítetted. Ugyanez a mező visszajön a
+`GET /license-documents` **listán**, a `GET /license-documents/{id}` részletezőn
+és a `GET /orders/{id}` `licenseDocuments[]` tömbjében.
+
+**Figyelmet igényel**, ha automatikusan töltöd:
+
+- **Rákerül a kiállított PDF-re**, a fejlécbe (`Kiállítói hivatkozás:`), tehát a
+  végfelhasználód is látja. Ezért a kiállításkor **rögzül**: utólag nem
+  módosítható, elgépelésnél visszavonás + újrakiállítás kell, új sorszámmal.
+- **Legfeljebb 63 karakter**, és csak **betű, számjegy, szóköz** meg a
+  `-` `_` `.` `/` `#` jelek. Bármi más - emoji, nyíl, kínai vagy arab írásjel,
+  gondolatjel, tipográfiai idézőjel - `validation_failed` (400); a hibaüzenet
+  megnevezi a kifogásolt karaktert. A szerver **nem vág le és nem szűr némán**:
+  az ok a PDF, két irányból is. A betűkészlet a hiányzó jel helyére mást
+  rajzolna, a sornál szélesebb érték pedig némán levágódna - a 63 ezért MÉRT
+  határ (a leghosszabb megengedett érték a legszélesebb engedett jelből még
+  éppen elfér a papíron), nem kerek szám. A **betű** itt szűk, explicit halmaz,
+  nem "minden latin betű": az ASCII betűk, valamint a Latin-1 Supplement és a
+  Latin Extended-A / -B ékezetes betűi (a magyar, a közép-európai és a román
+  vesszős alakok). Az ezeken túli latin betűk - például a vietnami ékezetesek -
+  és a horvát/szerb **digráf-ligatúrák**
+  (`Ǆ` `ǅ` `ǆ` `Ǉ` `ǈ` `ǉ` `Ǌ` `ǋ` `ǌ` `Ǳ` `ǲ` `ǳ`) **nem** mennek át; a
+  kétbetűs, DEKOMPONÁLT `DŽ` / `LJ` / `NJ` / `DZ` alak - amit a valódi szöveg
+  amúgy is használ - igen. A mező teljes leírása az `API.md`-ben.
+- A mező **nem egyedi** és nem azonosít: ugyanaz az érték több dokumentumon is
+  állhat, és nem lehet vele dokumentumot lekérni.
+
+CLI: a `keypro licdok get <id>` kiírja a `Saját hivatkozás` sort.
+
+MCP: a `keypro_license_documents_list` és a `keypro_license_document_get`
+válaszában ott a `partnerReference` mező.
+
 ## 0.1.17 - 2026-09-16
 
 ### Rendelés-csatolmány: a saját számlád a csomagba

@@ -29,7 +29,7 @@ export type { KeyproClient, KeyproClientOptions } from "./client.js";
  * (korabban a web 0.1.4-en ragadt). Kiadaskor a package.json-nal egyutt ez az
  * egy konstans valtozik.
  */
-export const KEYPRO_MCP_VERSION = "0.1.17";
+export const KEYPRO_MCP_VERSION = "0.1.18";
 
 /**
  * A szerver `instructions` mezoje (MCP initialize). A kliens modellje ezt latja
@@ -483,7 +483,7 @@ export function registerKeyproTools(server: McpServer, client: KeyproClient): vo
     {
       title: "My issued licence transfer documents",
       description:
-        "List the licence transfer documents this reseller account has issued to its own end customers (newest first). SUMMARY rows only: id, documentNumber, orderId, status (live/revoked), customerName, totalQty, items (productId, productName, qty), createdAt, revokedAt. Product keys are deliberately NOT on the list - fetch one document with keypro_license_document_get to get them. Filter by productId, by orderId (the order may be the document's primary source or appear in a key allocation) and by status.",
+        "List the licence transfer documents this reseller account has issued to its own end customers (newest first). SUMMARY rows only: id, documentNumber, orderId, status (live/revoked), customerName, totalQty, partnerReference, items (productId, productName, qty), createdAt, revokedAt. partnerReference is the RESELLER's own identifier (usually their own order number), set at issue time and printed on the PDF; it is optional, NOT unique, identifies nothing and orders nothing - null on documents issued before it existed. Product keys are deliberately NOT on the list - fetch one document with keypro_license_document_get to get them. Filter by productId, by orderId (the order may be the document's primary source or appear in a key allocation) and by status.",
       inputSchema: {
         productId: z.number().int().positive().optional(),
         orderId: z.number().int().positive().optional(),
@@ -513,7 +513,7 @@ export function registerKeyproTools(server: McpServer, client: KeyproClient): vo
     {
       title: "One issued licence transfer document",
       description:
-        "The FULL snapshot of one issued licence transfer document: the end customer's data (name, tax number, address, contact) as recorded at issue time, and items[] with keys[] carrying the FULL, unmasked keyValue plus its orderId / orderNumber. The keys come from the stored snapshot, never re-resolved from the licence service, so they never move and never go null. The `pdf` field holds the download URLs that ACTUALLY belong to this document; its keys follow from `licenseNature` (`used` -> transfer certificate + decommission statement, `new` -> licence certificate, `subscription` -> subscription certificate), so never assume the two old names. They need the same API key, they are not capability links. A document belonging to another account answers not_found, never 403.",
+        "The FULL snapshot of one issued licence transfer document: the end customer's data (name, tax number, address, contact) as recorded at issue time, the reseller's own partnerReference (their identifier, frozen at issue time and printed on the PDF; null when none was given), and items[] with keys[] carrying the FULL, unmasked keyValue plus its orderId / orderNumber. The keys come from the stored snapshot, never re-resolved from the licence service, so they never move and never go null. The `pdf` field holds the download URLs that ACTUALLY belong to this document; its keys follow from `licenseNature` (`used` -> transfer certificate + decommission statement, `new` -> licence certificate, `subscription` -> subscription certificate), so never assume the two old names. They need the same API key, they are not capability links. A document belonging to another account answers not_found, never 403.",
       inputSchema: { documentId: z.number().int().positive() },
       annotations: READ_ONLY,
     },
